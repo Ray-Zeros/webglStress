@@ -1,11 +1,19 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
+import legacy from '@vitejs/plugin-legacy';
 import path from 'path';
 import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [
+      react(),
+      tailwindcss(),
+      // 【改动 2】加入 legacy 规则，兜底老旧 WebView
+      legacy({
+        targets: ['chrome >= 49', 'android >= 4.4'],
+      }),
+    ],
     base: '/webglStress/', 
     resolve: {
       alias: {
