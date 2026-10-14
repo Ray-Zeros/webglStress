@@ -1,0 +1,6 @@
+{
+  "name": "GPU Fillrate & MRT Bandwidth Benchmark",
+  "description": "High-performance stress test and fillrate/MRT bandwidth benchmark for mobile and desktop GPUs across WebGL 2.0 and WebGPU with P99 frame latency, 10s rolling metrics, and PBR G-buffer synthesis.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
