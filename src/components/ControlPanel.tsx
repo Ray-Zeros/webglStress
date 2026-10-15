@@ -106,20 +106,23 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   };
 
   const isFloatSupported =
-    config.api === 'webgpu' || (config.api === 'webgl2' && deviceInfo.hasFloatColorBuffer);
+    config.api === 'webgpu' ||
+    ((config.api === 'webgl2' || config.api === 'webgl1') && deviceInfo.hasFloatColorBuffer);
+
+  const maxAllowedTargets = Math.max(1, deviceInfo.maxDrawBuffers || 4);
 
   return (
-    <div className="flex flex-col gap-4 rounded-2xl border border-slate-800/80 bg-slate-950/85 p-4 sm:p-5 backdrop-blur-md shadow-2xl text-slate-100 max-w-sm sm:max-w-md w-full overflow-y-auto max-h-[85vh]">
+    <div className="flex flex-col gap-3.5 rounded-2xl border border-slate-800 bg-[#090d16] p-3.5 sm:p-4 shadow-2xl text-slate-100 max-w-sm sm:max-w-md w-full touch-scroll overflow-y-auto max-h-[75vh] sm:max-h-[82vh]">
       {/* Fallback Warning Toast / Banner */}
       {webgpuFallbackWarning && (
-        <div className="rounded-xl border border-amber-500/40 bg-amber-950/30 p-3.5 flex items-start gap-3">
-          <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+        <div className="rounded-xl border border-amber-800 bg-[#2b1f0c] p-3 flex items-start gap-2.5">
+          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
           <div className="space-y-1 text-xs">
             <div className="font-semibold text-amber-200">Hardware / API Notice</div>
-            <div className="text-amber-300/80 leading-relaxed">{webgpuFallbackWarning}</div>
+            <div className="text-amber-300/90 leading-relaxed text-[11px]">{webgpuFallbackWarning}</div>
             <button
               onClick={onDismissWarning}
-              className="text-[11px] font-bold text-amber-400 hover:text-amber-200 underline mt-1"
+              className="text-[11px] font-bold text-amber-400 hover:text-amber-200 underline mt-0.5"
             >
               Dismiss
             </button>
@@ -134,83 +137,92 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             <Cpu className="w-3.5 h-3.5 text-cyan-400" />
             <span>Graphics Engine API</span>
           </span>
-          <span className="text-[11px] font-mono text-slate-400">
-            {config.api === 'webgpu' ? 'Modern Next-Gen' : 'Legacy / Broad Support'}
+          <span className="text-[11px] font-mono text-cyan-400 uppercase font-bold">
+            {config.api}
           </span>
         </div>
 
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-3 gap-1.5">
           <button
-            onClick={() => setApi('webgl2')}
-            className={`py-2 px-3 rounded-xl border text-xs font-bold transition flex items-center justify-center gap-2 ${
-              config.api === 'webgl2'
-                ? 'bg-cyan-500/20 border-cyan-500/60 text-cyan-300 shadow-lg shadow-cyan-500/10'
-                : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:bg-slate-850 hover:text-slate-200'
+            onClick={() => setApi('webgpu')}
+            disabled={!webgpuSupported}
+            className={`py-2 px-1.5 rounded-xl border text-xs font-bold transition flex flex-col items-center justify-center gap-0.5 ${
+              config.api === 'webgpu'
+                ? 'bg-[#1e1b4b] border-indigo-500 text-indigo-300 shadow-md'
+                : !webgpuSupported
+                ? 'bg-slate-900/40 border-slate-800/50 text-slate-600 cursor-not-allowed opacity-60'
+                : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
             }`}
+            title={!webgpuSupported ? 'WebGPU unavailable on this browser/platform' : 'Next-Gen WebGPU Engine'}
           >
-            <span>WebGL 2.0</span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-400">ES 3.0</span>
+            <span>WebGPU</span>
+            <span className="text-[9px] font-normal opacity-80">{webgpuSupported ? 'Modern' : 'Unsupported'}</span>
           </button>
 
           <button
-            onClick={() => {
-              if (webgpuSupported) {
-                setApi('webgpu');
-              } else {
-                setApi('webgl2');
-              }
-            }}
-            disabled={!webgpuSupported}
-            className={`py-2 px-3 rounded-xl border text-xs font-bold transition flex items-center justify-center gap-2 ${
-              config.api === 'webgpu'
-                ? 'bg-indigo-500/25 border-indigo-500/60 text-indigo-300 shadow-lg shadow-indigo-500/10'
-                : !webgpuSupported
-                ? 'bg-slate-900/30 border-slate-800/40 text-slate-600 cursor-not-allowed'
-                : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:bg-slate-850 hover:text-slate-200'
+            onClick={() => setApi('webgl2')}
+            className={`py-2 px-1.5 rounded-xl border text-xs font-bold transition flex flex-col items-center justify-center gap-0.5 ${
+              config.api === 'webgl2'
+                ? 'bg-[#082f49] border-cyan-500 text-cyan-300 shadow-md'
+                : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
             }`}
-            title={!webgpuSupported ? 'WebGPU is not supported on this browser or platform' : 'Switch to WebGPU'}
+            title="WebGL 2.0 (OpenGL ES 3.0)"
           >
-            <span>WebGPU</span>
-            {!webgpuSupported && (
-              <span className="text-[9px] px-1 rounded bg-rose-950/60 text-rose-400 border border-rose-800/40">
-                N/A
-              </span>
-            )}
+            <span>WebGL 2.0</span>
+            <span className="text-[9px] font-normal opacity-80">GLES 3.0</span>
+          </button>
+
+          <button
+            onClick={() => setApi('webgl1')}
+            className={`py-2 px-1.5 rounded-xl border text-xs font-bold transition flex flex-col items-center justify-center gap-0.5 ${
+              config.api === 'webgl1'
+                ? 'bg-[#2e1065] border-purple-500 text-purple-300 shadow-md'
+                : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+            }`}
+            title="Legacy WebGL 1.0 (for older devices like Mali-T628 / Android 4.4 - 7.0 WebViews)"
+          >
+            <span>WebGL 1.0</span>
+            <span className="text-[9px] font-normal opacity-80">Legacy Mali</span>
           </button>
         </div>
       </div>
 
       {/* 2. MRT Target Count Selector */}
-      <div className="space-y-2 border-t border-slate-800/60 pt-3">
+      <div className="space-y-2 border-t border-slate-800 pt-3">
         <div className="flex items-center justify-between text-xs font-semibold text-slate-300">
           <span className="flex items-center gap-1.5 uppercase tracking-wider">
             <Layers className="w-3.5 h-3.5 text-cyan-400" />
             <span>Active Render Targets (MRT)</span>
           </span>
           <span className="font-mono text-cyan-400 font-bold">
-            {config.mrtCount} {config.mrtCount === 1 ? 'Target' : 'Targets'}
+            {config.mrtCount} Targets (Max: {maxAllowedTargets})
           </span>
         </div>
 
-        <div className="grid grid-cols-4 gap-2">
-          {([1, 2, 3, 4] as const).map((count) => (
-            <button
-              key={count}
-              onClick={() => setMrtCount(count)}
-              className={`py-1.5 px-2 rounded-xl border text-xs font-bold transition font-mono ${
-                config.mrtCount === count
-                  ? 'bg-cyan-500/20 border-cyan-500 text-cyan-300'
-                  : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:bg-slate-850 hover:text-slate-200'
-              }`}
-            >
-              {count} MRT
-            </button>
-          ))}
+        <div className="grid grid-cols-4 gap-1.5">
+          {([1, 2, 3, 4] as const).map((count) => {
+            const isExceedingHardware = count > maxAllowedTargets;
+            return (
+              <button
+                key={count}
+                onClick={() => setMrtCount(count)}
+                className={`py-1.5 px-2 rounded-xl border text-xs font-bold transition font-mono ${
+                  config.mrtCount === count
+                    ? 'bg-cyan-950 border-cyan-500 text-cyan-300 shadow'
+                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                }`}
+                title={isExceedingHardware ? `Hardware limit is ${maxAllowedTargets} MRT; will render up to limit` : undefined}
+              >
+                {count} MRT
+                {isExceedingHardware && <span className="block text-[8px] text-amber-400">*Clamped</span>}
+              </button>
+            );
+          })}
         </div>
       </div>
 
       {/* 3. Per-Target Dynamic Format Selectors */}
-      <div className="space-y-2.5 border-t border-slate-800/60 pt-3">
+      <div className="space-y-2 border-t border-slate-800 pt-3">
         <div className="flex items-center justify-between text-xs font-semibold text-slate-300">
           <span className="flex items-center gap-1.5 uppercase tracking-wider">
             <Sliders className="w-3.5 h-3.5 text-cyan-400" />
@@ -218,33 +230,33 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
           </span>
           {!isFloatSupported && (
             <span className="text-[10px] text-amber-400 font-mono">
-              RGBA16F unavailable (no float buffer)
+              RGBA16F unavailable
             </span>
           )}
         </div>
 
-        <div className="space-y-2">
+        <div className="space-y-1.5">
           {Array.from({ length: config.mrtCount }).map((_, index) => {
-            const desc = TARGET_DESCRIPTIONS[index];
+            const desc = TARGET_DESCRIPTIONS[index] || { name: `Target ${index}`, role: 'Color', short: `T${index}` };
             const currentFormat = config.formats[index];
             const bytes = currentFormat === 'RGBA16F' ? 8 : 4;
 
             return (
               <div
                 key={index}
-                className="flex items-center justify-between p-2.5 rounded-xl border border-slate-800/70 bg-slate-900/50 text-xs"
+                className="flex items-center justify-between p-2 rounded-xl border border-slate-800 bg-[#0f172a] text-xs"
               >
                 <div>
-                  <div className="font-semibold text-slate-200 flex items-center gap-2">
+                  <div className="font-semibold text-slate-200 flex items-center gap-1.5">
                     <span>{desc.name}:</span>
                     <span className="text-cyan-400 font-mono">{desc.short}</span>
                   </div>
-                  <div className="text-[10px] text-slate-500">{desc.role}</div>
+                  <div className="text-[10px] text-slate-400">{desc.role}</div>
                 </div>
 
                 <div className="flex items-center gap-1.5">
                   <span className="font-mono text-[11px] text-slate-400 mr-1">{bytes}B/px</span>
-                  <div className="inline-flex rounded-lg border border-slate-800 p-0.5 bg-slate-950">
+                  <div className="inline-flex rounded-lg border border-slate-800 p-0.5 bg-black">
                     <button
                       onClick={() => setFormat(index, 'RGBA8')}
                       className={`px-2 py-1 rounded-md text-[10px] font-mono font-bold transition ${
@@ -264,12 +276,12 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                       disabled={!isFloatSupported}
                       className={`px-2 py-1 rounded-md text-[10px] font-mono font-bold transition ${
                         currentFormat === 'RGBA16F'
-                          ? 'bg-cyan-600 text-white shadow'
+                          ? 'bg-cyan-600 text-white'
                           : !isFloatSupported
-                          ? 'text-slate-600 cursor-not-allowed opacity-50'
+                          ? 'text-slate-600 cursor-not-allowed opacity-40'
                           : 'text-slate-400 hover:text-slate-200'
                       }`}
-                      title={!isFloatSupported ? 'RGBA16F requires EXT_color_buffer_float' : '8 bytes per pixel FP16'}
+                      title={!isFloatSupported ? 'Requires floating-point color buffer support' : '8 bytes per pixel FP16'}
                     >
                       RGBA16F
                     </button>
@@ -282,7 +294,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
       </div>
 
       {/* 4. Viewport & Resolution Control */}
-      <div className="space-y-2 border-t border-slate-800/60 pt-3">
+      <div className="space-y-2 border-t border-slate-800 pt-3">
         <div className="flex items-center justify-between text-xs font-semibold text-slate-300">
           <span className="flex items-center gap-1.5 uppercase tracking-wider">
             <Monitor className="w-3.5 h-3.5 text-cyan-400" />
@@ -296,60 +308,60 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
         <div className="grid grid-cols-3 gap-1.5 text-xs font-mono">
           <button
             onClick={() => setResolutionPreset('720p')}
-            className={`py-1.5 px-2 rounded-lg border transition ${
+            className={`py-1.5 px-1.5 rounded-lg border transition ${
               config.resolutionPreset === '720p'
-                ? 'bg-cyan-500/20 border-cyan-500 text-cyan-300 font-bold'
-                : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:bg-slate-850'
+                ? 'bg-cyan-950 border-cyan-500 text-cyan-300 font-bold'
+                : 'bg-slate-900 border-slate-800 text-slate-400'
             }`}
           >
             720p (HD)
           </button>
           <button
             onClick={() => setResolutionPreset('1080p')}
-            className={`py-1.5 px-2 rounded-lg border transition ${
+            className={`py-1.5 px-1.5 rounded-lg border transition ${
               config.resolutionPreset === '1080p'
-                ? 'bg-cyan-500/20 border-cyan-500 text-cyan-300 font-bold'
-                : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:bg-slate-850'
+                ? 'bg-cyan-950 border-cyan-500 text-cyan-300 font-bold'
+                : 'bg-slate-900 border-slate-800 text-slate-400'
             }`}
           >
             1080p (FHD)
           </button>
           <button
             onClick={() => setResolutionPreset('1440p')}
-            className={`py-1.5 px-2 rounded-lg border transition ${
+            className={`py-1.5 px-1.5 rounded-lg border transition ${
               config.resolutionPreset === '1440p'
-                ? 'bg-cyan-500/20 border-cyan-500 text-cyan-300 font-bold'
-                : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:bg-slate-850'
+                ? 'bg-cyan-950 border-cyan-500 text-cyan-300 font-bold'
+                : 'bg-slate-900 border-slate-800 text-slate-400'
             }`}
           >
             1440p (2K)
           </button>
           <button
             onClick={() => setResolutionPreset('4k')}
-            className={`py-1.5 px-2 rounded-lg border transition ${
+            className={`py-1.5 px-1.5 rounded-lg border transition ${
               config.resolutionPreset === '4k'
-                ? 'bg-cyan-500/20 border-cyan-500 text-cyan-300 font-bold'
-                : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:bg-slate-850'
+                ? 'bg-cyan-950 border-cyan-500 text-cyan-300 font-bold'
+                : 'bg-slate-900 border-slate-800 text-slate-400'
             }`}
           >
             2160p (4K)
           </button>
           <button
             onClick={() => setResolutionPreset('native')}
-            className={`py-1.5 px-2 rounded-lg border transition ${
+            className={`py-1.5 px-1.5 rounded-lg border transition ${
               config.resolutionPreset === 'native'
-                ? 'bg-cyan-500/20 border-cyan-500 text-cyan-300 font-bold'
-                : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:bg-slate-850'
+                ? 'bg-cyan-950 border-cyan-500 text-cyan-300 font-bold'
+                : 'bg-slate-900 border-slate-800 text-slate-400'
             }`}
           >
-            Device Native
+            Native
           </button>
           <button
             onClick={() => setResolutionPreset('custom')}
-            className={`py-1.5 px-2 rounded-lg border transition ${
+            className={`py-1.5 px-1.5 rounded-lg border transition ${
               config.resolutionPreset === 'custom'
-                ? 'bg-cyan-500/20 border-cyan-500 text-cyan-300 font-bold'
-                : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:bg-slate-850'
+                ? 'bg-cyan-950 border-cyan-500 text-cyan-300 font-bold'
+                : 'bg-slate-900 border-slate-800 text-slate-400'
             }`}
           >
             Custom
@@ -357,7 +369,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
         </div>
 
         {config.resolutionPreset === 'custom' && (
-          <div className="flex items-center gap-2 mt-2 pt-2 border-t border-slate-850">
+          <div className="flex items-center gap-2 mt-2 pt-2 border-t border-slate-800">
             <div className="flex-1">
               <label className="text-[10px] text-slate-400 block mb-0.5">Width (px)</label>
               <input
@@ -388,8 +400,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
       </div>
 
       {/* 5. Shader ALU Complexity & Fillrate Passes */}
-      <div className="space-y-3 border-t border-slate-800/60 pt-3">
-        {/* ALU Complexity */}
+      <div className="space-y-2.5 border-t border-slate-800 pt-3">
         <div className="space-y-1.5">
           <div className="flex items-center justify-between text-xs font-semibold text-slate-300">
             <span className="flex items-center gap-1.5 uppercase tracking-wider">
@@ -398,10 +409,10 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             </span>
             <span className="text-[11px] font-mono text-slate-400 uppercase">
               {config.aluComplexity === 'low'
-                ? 'Memory Bound'
+                ? 'Bandwidth Bound'
                 : config.aluComplexity === 'medium'
                 ? 'Balanced'
-                : 'Compute Heavy'}
+                : 'ALU Heavy'}
             </span>
           </div>
 
@@ -412,8 +423,8 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                 onClick={() => setAluComplexity(lvl)}
                 className={`py-1.5 px-2 rounded-lg border capitalize transition ${
                   config.aluComplexity === lvl
-                    ? 'bg-amber-500/20 border-amber-500 text-amber-300 font-bold'
-                    : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:bg-slate-850'
+                    ? 'bg-amber-950 border-amber-500 text-amber-300 font-bold'
+                    : 'bg-slate-900 border-slate-800 text-slate-400'
                 }`}
               >
                 {lvl}
@@ -436,8 +447,8 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                 onClick={() => setPasses(pass)}
                 className={`py-1 rounded-lg border transition ${
                   config.passes === pass
-                    ? 'bg-cyan-500/20 border-cyan-500 text-cyan-300 font-bold'
-                    : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:bg-slate-850'
+                    ? 'bg-cyan-950 border-cyan-500 text-cyan-300 font-bold'
+                    : 'bg-slate-900 border-slate-800 text-slate-400'
                 }`}
               >
                 {pass}x
@@ -448,13 +459,13 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
       </div>
 
       {/* 6. Visual Target Preview Mode */}
-      <div className="space-y-2 border-t border-slate-800/60 pt-3">
+      <div className="space-y-2 border-t border-slate-800 pt-3">
         <div className="flex items-center justify-between text-xs font-semibold text-slate-300">
           <span className="flex items-center gap-1.5 uppercase tracking-wider">
             <Eye className="w-3.5 h-3.5 text-cyan-400" />
             <span>Target Preview / Blit Mode</span>
           </span>
-          <span className="text-[10px] text-slate-400">Main screen display</span>
+          <span className="text-[10px] text-slate-400">Screen Output</span>
         </div>
 
         <div className="grid grid-cols-3 gap-1.5 text-xs font-mono">
@@ -462,8 +473,8 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             onClick={() => setPreviewTarget('target0')}
             className={`py-1.5 px-2 rounded-lg border transition ${
               config.previewTarget === 'target0'
-                ? 'bg-cyan-500/20 border-cyan-500 text-cyan-300 font-bold'
-                : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:bg-slate-850'
+                ? 'bg-cyan-950 border-cyan-500 text-cyan-300 font-bold'
+                : 'bg-slate-900 border-slate-800 text-slate-400'
             }`}
           >
             T0 (Albedo)
@@ -473,10 +484,10 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             disabled={config.mrtCount < 2}
             className={`py-1.5 px-2 rounded-lg border transition ${
               config.previewTarget === 'target1'
-                ? 'bg-cyan-500/20 border-cyan-500 text-cyan-300 font-bold'
+                ? 'bg-cyan-950 border-cyan-500 text-cyan-300 font-bold'
                 : config.mrtCount < 2
-                ? 'bg-slate-900/20 border-slate-850 text-slate-600 cursor-not-allowed'
-                : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:bg-slate-850'
+                ? 'bg-slate-900/30 border-slate-900 text-slate-700 cursor-not-allowed'
+                : 'bg-slate-900 border-slate-800 text-slate-400'
             }`}
           >
             T1 (Normal)
@@ -486,10 +497,10 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             disabled={config.mrtCount < 3}
             className={`py-1.5 px-2 rounded-lg border transition ${
               config.previewTarget === 'target2'
-                ? 'bg-cyan-500/20 border-cyan-500 text-cyan-300 font-bold'
+                ? 'bg-cyan-950 border-cyan-500 text-cyan-300 font-bold'
                 : config.mrtCount < 3
-                ? 'bg-slate-900/20 border-slate-850 text-slate-600 cursor-not-allowed'
-                : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:bg-slate-850'
+                ? 'bg-slate-900/30 border-slate-900 text-slate-700 cursor-not-allowed'
+                : 'bg-slate-900 border-slate-800 text-slate-400'
             }`}
           >
             T2 (Material)
@@ -499,10 +510,10 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             disabled={config.mrtCount < 4}
             className={`py-1.5 px-2 rounded-lg border transition ${
               config.previewTarget === 'target3'
-                ? 'bg-cyan-500/20 border-cyan-500 text-cyan-300 font-bold'
+                ? 'bg-cyan-950 border-cyan-500 text-cyan-300 font-bold'
                 : config.mrtCount < 4
-                ? 'bg-slate-900/20 border-slate-850 text-slate-600 cursor-not-allowed'
-                : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:bg-slate-850'
+                ? 'bg-slate-900/30 border-slate-900 text-slate-700 cursor-not-allowed'
+                : 'bg-slate-900 border-slate-800 text-slate-400'
             }`}
           >
             T3 (Emissive)
@@ -511,8 +522,8 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             onClick={() => setPreviewTarget('split')}
             className={`col-span-2 py-1.5 px-2 rounded-lg border flex items-center justify-center gap-1.5 transition ${
               config.previewTarget === 'split'
-                ? 'bg-cyan-500/20 border-cyan-500 text-cyan-300 font-bold'
-                : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:bg-slate-850'
+                ? 'bg-cyan-950 border-cyan-500 text-cyan-300 font-bold'
+                : 'bg-slate-900 border-slate-800 text-slate-400'
             }`}
           >
             <Grid2X2 className="w-3.5 h-3.5" />
@@ -522,12 +533,12 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
       </div>
 
       {/* 7. Bottom Action Controls */}
-      <div className="border-t border-slate-800/60 pt-3 flex items-center justify-between gap-2">
+      <div className="border-t border-slate-800 pt-3 flex items-center justify-between gap-2">
         <button
           onClick={togglePause}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition ${
             config.isPaused
-              ? 'bg-amber-600 border-amber-500 text-white shadow-lg'
+              ? 'bg-amber-600 border-amber-500 text-white'
               : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800'
           }`}
         >

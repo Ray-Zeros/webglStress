@@ -1,23 +1,27 @@
-import { BenchmarkConfig, GpuDeviceInfo } from '../types/benchmark';
+import { BenchmarkConfig, GpuDeviceInfo, GraphicsAPI } from '../types/benchmark';
 
 export class WebGL2Engine {
   private canvas: HTMLCanvasElement;
-  private gl: WebGL2RenderingContext | null = null;
+  private gl: WebGL2RenderingContext | WebGLRenderingContext | null = null;
+  private isWebGL2 = false;
+  private extDrawBuffers: any = null; // WEBGL_draw_buffers for WebGL 1.0
+  private extColorBufferFloat: any = null;
+  private maxDrawBuffers = 1;
+  private maxTextureSize = 2048;
+
   private fbo: WebGLFramebuffer | null = null;
   private textures: (WebGLTexture | null)[] = [null, null, null, null];
   private currentWidth = 0;
   private currentHeight = 0;
   private mtrProgram: WebGLProgram | null = null;
   private blitProgram: WebGLProgram | null = null;
-  private vao: WebGLVertexArrayObject | null = null;
   private vbo: WebGLBuffer | null = null;
+  private vao: any = null; // WebGLVertexArrayObject or OES_vertex_array_object
   private hasFloatColorBuffer = false;
   private isContextLost = false;
-  private extColorBufferFloat: any = null;
   private onContextLostCallback?: () => void;
   private onContextRestoredCallback?: () => void;
 
-  // Uniform locations cache
   private mrtUniforms = {
     time: null as WebGLUniformLocation | null,
     resolution: null as WebGLUniformLocation | null,
@@ -30,11 +34,12 @@ export class WebGL2Engine {
     tex1: null as WebGLUniformLocation | null,
     tex2: null as WebGLUniformLocation | null,
     tex3: null as WebGLUniformLocation | null,
-    previewMode: null as WebGLUniformLocation | null, // 0..3 for target 0..3, 4 for split
+    previewMode: null as WebGLUniformLocation | null,
   };
 
   constructor(
     canvas: HTMLCanvasElement,
+    preferredApi: GraphicsAPI = 'webgl2',
     onContextLost?: () => void,
     onContextRestored?: () => void
   ) {
@@ -42,29 +47,75 @@ export class WebGL2Engine {
     this.onContextLostCallback = onContextLost;
     this.onContextRestoredCallback = onContextRestored;
 
-    this.initContext();
+    this.initContext(preferredApi);
   }
 
-  private initContext(): boolean {
-    const gl = this.canvas.getContext('webgl2', {
+  private initContext(preferredApi: GraphicsAPI): boolean {
+    const contextAttributes: WebGLContextAttributes = {
       alpha: false,
       antialias: false,
       depth: false,
       stencil: false,
       preserveDrawingBuffer: false,
       powerPreference: 'high-performance',
-    });
+    };
+
+    let gl: any = null;
+
+    // 1. Try WebGL 2.0 first if requested
+    if (preferredApi === 'webgl2') {
+      try {
+        gl = this.canvas.getContext('webgl2', contextAttributes);
+        if (gl) {
+          this.isWebGL2 = true;
+        }
+      } catch (e) {
+        console.warn('WebGL 2.0 context acquisition error:', e);
+      }
+    }
+
+    // 2. Fallback to WebGL 1.0 (vital for ARM Mali-T628, older Android WebViews, etc.)
+    if (!gl) {
+      try {
+        gl =
+          this.canvas.getContext('webgl', contextAttributes) ||
+          this.canvas.getContext('experimental-webgl', contextAttributes);
+        if (gl) {
+          this.isWebGL2 = false;
+        }
+      } catch (e) {
+        console.warn('WebGL 1.0 context acquisition error:', e);
+      }
+    }
 
     if (!gl) {
+      console.error('Neither WebGL 2.0 nor WebGL 1.0 is available on this browser/hardware.');
       return false;
     }
 
     this.gl = gl;
     this.isContextLost = false;
 
-    // Check extensions
-    this.extColorBufferFloat = gl.getExtension('EXT_color_buffer_float');
-    this.hasFloatColorBuffer = !!this.extColorBufferFloat;
+    // Query extensions and capabilities
+    if (this.isWebGL2) {
+      this.extColorBufferFloat = gl.getExtension('EXT_color_buffer_float');
+      this.hasFloatColorBuffer = !!this.extColorBufferFloat;
+      this.maxDrawBuffers = gl.getParameter(gl.MAX_DRAW_BUFFERS) || 4;
+    } else {
+      // WebGL 1.0
+      this.extDrawBuffers = gl.getExtension('WEBGL_draw_buffers');
+      if (this.extDrawBuffers) {
+        this.maxDrawBuffers = gl.getParameter(this.extDrawBuffers.MAX_DRAW_BUFFERS_WEBGL) || 4;
+      } else {
+        this.maxDrawBuffers = 1;
+      }
+
+      const halfFloatExt = gl.getExtension('OES_texture_half_float');
+      const halfFloatColorExt = gl.getExtension('EXT_color_buffer_half_float');
+      this.hasFloatColorBuffer = !!(halfFloatExt && halfFloatColorExt);
+    }
+
+    this.maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) || 2048;
 
     this.setupContextLostListeners();
     this.initShaders();
@@ -82,12 +133,16 @@ export class WebGL2Engine {
 
     const handleRestored = () => {
       this.isContextLost = false;
-      this.initContext();
+      this.initContext(this.isWebGL2 ? 'webgl2' : 'webgl1');
       this.onContextRestoredCallback?.();
     };
 
     this.canvas.addEventListener('webglcontextlost', handleLost as EventListener, false);
     this.canvas.addEventListener('webglcontextrestored', handleRestored as EventListener, false);
+  }
+
+  public getActiveApi(): GraphicsAPI {
+    return this.isWebGL2 ? 'webgl2' : 'webgl1';
   }
 
   public getDeviceInfo(): GpuDeviceInfo {
@@ -106,31 +161,33 @@ export class WebGL2Engine {
 
     const gl = this.gl;
     const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
-    let renderer = 'WebGL 2.0 Hardware';
+    let renderer = this.isWebGL2 ? 'WebGL 2.0 Hardware' : 'WebGL 1.0 Hardware (Mali/Adreno Legacy)';
     let vendor = 'Generic';
 
     if (debugInfo) {
       renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || gl.getParameter(gl.RENDERER);
       vendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) || gl.getParameter(gl.VENDOR);
     } else {
-      renderer = gl.getParameter(gl.RENDERER) || 'Generic WebGL 2.0';
-      vendor = gl.getParameter(gl.VENDOR) || 'Generic';
+      renderer = gl.getParameter(gl.RENDERER) || renderer;
+      vendor = gl.getParameter(gl.VENDOR) || vendor;
     }
 
-    const maxDrawBuffers = gl.getParameter(gl.MAX_DRAW_BUFFERS) || 4;
-    const maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) || 4096;
-
     const features: string[] = [];
-    if (this.hasFloatColorBuffer) features.push('EXT_color_buffer_float (RGBA16F Renderable)');
-    if (gl.getExtension('OES_texture_float_linear')) features.push('OES_texture_float_linear');
-    if (gl.getExtension('EXT_texture_filter_anisotropic')) features.push('Anisotropic Filtering');
+    if (this.isWebGL2) {
+      features.push('Core WebGL 2.0 (GLES 3.0)');
+      if (this.hasFloatColorBuffer) features.push('EXT_color_buffer_float (RGBA16F)');
+    } else {
+      features.push('Legacy WebGL 1.0 (GLES 2.0)');
+      if (this.extDrawBuffers) features.push('WEBGL_draw_buffers (MRT)');
+      else features.push('Single Target Only (No MRT)');
+    }
 
     return {
-      api: 'webgl2',
+      api: this.isWebGL2 ? 'webgl2' : 'webgl1',
       renderer,
       vendor,
-      maxDrawBuffers,
-      maxTextureSize,
+      maxDrawBuffers: this.maxDrawBuffers,
+      maxTextureSize: this.maxTextureSize,
       hasFloatColorBuffer: this.hasFloatColorBuffer,
       webgpuSupported: typeof navigator !== 'undefined' && 'gpu' in navigator,
       features,
@@ -141,128 +198,290 @@ export class WebGL2Engine {
     if (!this.gl) return;
     const gl = this.gl;
 
-    // 1. MRT Vertex Shader (Single full-screen triangle)
-    const vsSource = `#version 300 es
-    precision highp float;
-    layout(location = 0) in vec2 a_position;
-    out vec2 v_uv;
+    let vsSource = '';
+    let fsSource = '';
+    let blitFsSource = '';
 
-    void main() {
-      v_uv = a_position * 0.5 + 0.5;
-      gl_Position = vec4(a_position, 0.0, 1.0);
-    }
-    `;
+    if (this.isWebGL2) {
+      // --- WebGL 2.0 Shaders (GLSL 3.00 ES) ---
+      vsSource = `#version 300 es
+      precision highp float;
+      layout(location = 0) in vec2 a_position;
+      out vec2 v_uv;
 
-    // 2. MRT Fragment Shader (Synthetic PBR G-Buffer Generator)
-    const fsSource = `#version 300 es
-    precision highp float;
+      void main() {
+        v_uv = a_position * 0.5 + 0.5;
+        gl_Position = vec4(a_position, 0.0, 1.0);
+      }
+      `;
 
-    in vec2 v_uv;
+      fsSource = `#version 300 es
+      #ifdef GL_FRAGMENT_PRECISION_HIGH
+      precision highp float;
+      #else
+      precision mediump float;
+      #endif
 
-    layout(location = 0) out vec4 outTarget0; // Albedo / BaseColor + Opacity
-    layout(location = 1) out vec4 outTarget1; // World Normal + Roughness
-    layout(location = 2) out vec4 outTarget2; // Metallic, AO, Specular, Curvature
-    layout(location = 3) out vec4 outTarget3; // Emissive / Velocity Vector
+      in vec2 v_uv;
 
-    uniform float u_time;
-    uniform vec2 u_resolution;
-    uniform int u_alu_complexity; // 0 = Low, 1 = Medium, 2 = Heavy
-    uniform int u_mrt_count;
+      layout(location = 0) out vec4 outTarget0;
+      layout(location = 1) out vec4 outTarget1;
+      layout(location = 2) out vec4 outTarget2;
+      layout(location = 3) out vec4 outTarget3;
 
-    // Fast pseudo hash/noise for ALU synthesis
-    float hash(vec2 p) {
-      p = fract(p * vec2(123.34, 456.21));
-      p += dot(p, p + 45.32);
-      return fract(p.x * p.y);
-    }
+      uniform float u_time;
+      uniform vec2 u_resolution;
+      uniform int u_alu_complexity;
+      uniform int u_mrt_count;
 
-    float noise(vec2 p) {
-      vec2 i = floor(p);
-      vec2 f = fract(p);
-      vec2 u = f * f * (3.0 - 2.0 * f);
-      return mix(
-        mix(hash(i + vec2(0.0, 0.0)), hash(i + vec2(1.0, 0.0)), u.x),
-        mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x),
-        u.y
-      );
-    }
-
-    void main() {
-      vec2 uv = v_uv;
-      vec2 aspectUv = (uv - 0.5) * vec2(u_resolution.x / u_resolution.y, 1.0);
-      float t = u_time * 0.8;
-
-      // Base coordinate dynamics
-      vec2 p = aspectUv * 3.0;
-
-      // ALU complexity variations
-      float aluAccum = 0.0;
-      if (u_alu_complexity == 0) {
-        // Low: Minimal math, purely testing memory write bus
-        aluAccum = sin(p.x * 4.0 + t) * cos(p.y * 4.0 - t);
-      } else if (u_alu_complexity == 1) {
-        // Medium: Procedural ripple waves + voronoi-like interference
-        float d = length(aspectUv);
-        aluAccum = sin(d * 18.0 - t * 3.0) + cos(aspectUv.x * 12.0 + t) * sin(aspectUv.y * 12.0 - t);
-        aluAccum += noise(uv * 8.0 + vec2(t * 0.2));
-      } else {
-        // Heavy: Multi-octave fBm loop to saturate shader ALU cores
-        vec2 q = uv * 6.0;
-        float amp = 1.0;
-        mat2 rot = mat2(cos(0.5), sin(0.5), -sin(0.5), cos(0.5));
-        for (int i = 0; i < 7; i++) {
-          aluAccum += amp * noise(q + vec2(t * 0.3, -t * 0.2));
-          q = rot * q * 2.02 + vec2(float(i) * 1.7);
-          amp *= 0.5;
-        }
-        // Additional trigonometric saturation
-        aluAccum += sin(aspectUv.x * 24.0 + aluAccum * 3.0) * cos(aspectUv.y * 24.0 - aluAccum * 3.0);
+      float hash(vec2 p) {
+        p = fract(p * vec2(123.34, 456.21));
+        p += dot(p, p + 45.32);
+        return fract(p.x * p.y);
       }
 
-      // --- Target 0: Albedo / BaseColor + Opacity ---
-      vec3 colA = vec3(0.08, 0.45, 0.95); // Deep electric cobalt
-      vec3 colB = vec3(0.98, 0.32, 0.15); // Neon amber
-      vec3 colC = vec3(0.12, 0.85, 0.55); // Emerald cyan
-      float pattern = 0.5 + 0.5 * sin(p.x * 3.0 + aluAccum * 1.5 + t);
-      vec3 albedo = mix(colA, mix(colB, colC, sin(t * 0.5) * 0.5 + 0.5), pattern);
-      float opacity = 1.0;
-      outTarget0 = vec4(albedo, opacity);
+      float noise(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        vec2 u = f * f * (3.0 - 2.0 * f);
+        return mix(
+          mix(hash(i + vec2(0.0, 0.0)), hash(i + vec2(1.0, 0.0)), u.x),
+          mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x),
+          u.y
+        );
+      }
 
-      if (u_mrt_count <= 1) return;
+      void main() {
+        // Pre-initialize ALL outputs to satisfy Mali compiler (never leave uninitialized outputs)
+        outTarget0 = vec4(0.0, 0.0, 0.0, 1.0);
+        outTarget1 = vec4(0.0, 0.0, 0.0, 1.0);
+        outTarget2 = vec4(0.0, 0.0, 0.0, 1.0);
+        outTarget3 = vec4(0.0, 0.0, 0.0, 1.0);
 
-      // --- Target 1: World Normal + Roughness ---
-      // Generate dynamic spherical / wave normal vectors
-      vec2 nGrad = vec2(
-        sin(p.x * 5.0 + t + aluAccum),
-        cos(p.y * 5.0 - t + aluAccum)
-      ) * 0.6;
-      vec3 normal = normalize(vec3(nGrad, 1.0));
-      // Map [-1, 1] to [0, 1] for previewing
-      vec3 normalEncoded = normal * 0.5 + 0.5;
-      float roughness = clamp(0.1 + 0.8 * abs(sin(aluAccum * 2.0 + t * 0.5)), 0.05, 0.95);
-      outTarget1 = vec4(normalEncoded, roughness);
+        vec2 uv = v_uv;
+        vec2 aspectUv = (uv - 0.5) * vec2(u_resolution.x / max(u_resolution.y, 1.0), 1.0);
+        float t = u_time * 0.8;
+        vec2 p = aspectUv * 3.0;
 
-      if (u_mrt_count <= 2) return;
+        float aluAccum = 0.0;
+        if (u_alu_complexity == 0) {
+          aluAccum = sin(p.x * 4.0 + t) * cos(p.y * 4.0 - t);
+        } else if (u_alu_complexity == 1) {
+          float d = length(aspectUv);
+          aluAccum = sin(d * 18.0 - t * 3.0) + cos(aspectUv.x * 12.0 + t) * sin(aspectUv.y * 12.0 - t);
+          aluAccum += noise(uv * 8.0 + vec2(t * 0.2));
+        } else {
+          vec2 q = uv * 6.0;
+          float amp = 1.0;
+          mat2 rot = mat2(cos(0.5), sin(0.5), -sin(0.5), cos(0.5));
+          for (int i = 0; i < 7; i++) {
+            aluAccum += amp * noise(q + vec2(t * 0.3, -t * 0.2));
+            q = rot * q * 2.02 + vec2(float(i) * 1.7);
+            amp *= 0.5;
+          }
+          aluAccum += sin(aspectUv.x * 24.0 + aluAccum * 3.0) * cos(aspectUv.y * 24.0 - aluAccum * 3.0);
+        }
 
-      // --- Target 2: Metallic, AO, Specular, Curvature ---
-      float metallic = clamp(sin(p.y * 4.0 - t * 0.7) * 0.5 + 0.5, 0.0, 1.0);
-      float ao = clamp(1.0 - length(aspectUv) * 0.4 + aluAccum * 0.15, 0.2, 1.0);
-      float specular = 0.5;
-      float curvature = abs(normal.x * normal.y);
-      outTarget2 = vec4(metallic, ao, specular, curvature);
+        // Target 0: Albedo
+        vec3 colA = vec3(0.08, 0.45, 0.95);
+        vec3 colB = vec3(0.98, 0.32, 0.15);
+        vec3 colC = vec3(0.12, 0.85, 0.55);
+        float pattern = 0.5 + 0.5 * sin(p.x * 3.0 + aluAccum * 1.5 + t);
+        vec3 albedo = mix(colA, mix(colB, colC, sin(t * 0.5) * 0.5 + 0.5), pattern);
+        outTarget0 = vec4(albedo, 1.0);
 
-      if (u_mrt_count <= 3) return;
+        if (u_mrt_count > 1) {
+          vec2 nGrad = vec2(sin(p.x * 5.0 + t + aluAccum), cos(p.y * 5.0 - t + aluAccum)) * 0.6;
+          vec3 normal = normalize(vec3(nGrad, 1.0));
+          float roughness = clamp(0.1 + 0.8 * abs(sin(aluAccum * 2.0 + t * 0.5)), 0.05, 0.95);
+          outTarget1 = vec4(normal * 0.5 + 0.5, roughness);
 
-      // --- Target 3: Emissive / Velocity Vector ---
-      // High-energy glowing wireframe grid + motion vector
-      vec2 grid = abs(fract(aspectUv * 6.0 - vec2(t * 0.2, t * 0.1)) - 0.5) / fwidth(aspectUv * 6.0);
-      float line = min(grid.x, grid.y);
-      float emissiveMask = 1.0 - min(line, 1.0);
-      vec3 emissive = vec3(0.2, 0.9, 1.0) * emissiveMask * 2.5;
-      vec2 velocity = vec2(sin(t), cos(t)) * 0.016; // Simulated screen velocity
-      outTarget3 = vec4(emissive.xy + velocity, emissive.z, 1.0);
+          if (u_mrt_count > 2) {
+            float metallic = clamp(sin(p.y * 4.0 - t * 0.7) * 0.5 + 0.5, 0.0, 1.0);
+            float ao = clamp(1.0 - length(aspectUv) * 0.4 + aluAccum * 0.15, 0.2, 1.0);
+            outTarget2 = vec4(metallic, ao, 0.5, abs(normal.x * normal.y));
+
+            if (u_mrt_count > 3) {
+              vec2 fw = max(fwidth(aspectUv * 6.0), vec2(0.001));
+              vec2 grid = abs(fract(aspectUv * 6.0 - vec2(t * 0.2, t * 0.1)) - 0.5) / fw;
+              float line = min(grid.x, grid.y);
+              float emissiveMask = 1.0 - min(line, 1.0);
+              vec3 emissive = vec3(0.2, 0.9, 1.0) * emissiveMask * 2.5;
+              vec2 velocity = vec2(sin(t), cos(t)) * 0.016;
+              outTarget3 = vec4(emissive.xy + velocity, emissive.z, 1.0);
+            }
+          }
+        }
+      }
+      `;
+
+      blitFsSource = `#version 300 es
+      #ifdef GL_FRAGMENT_PRECISION_HIGH
+      precision highp float;
+      #else
+      precision mediump float;
+      #endif
+
+      in vec2 v_uv;
+      out vec4 fragColor;
+
+      uniform sampler2D u_tex0;
+      uniform sampler2D u_tex1;
+      uniform sampler2D u_tex2;
+      uniform sampler2D u_tex3;
+      uniform int u_preview_mode;
+
+      void main() {
+        vec2 uv = v_uv;
+        if (u_preview_mode == 0) {
+          fragColor = texture(u_tex0, uv);
+        } else if (u_preview_mode == 1) {
+          fragColor = texture(u_tex1, uv);
+        } else if (u_preview_mode == 2) {
+          fragColor = vec4(texture(u_tex2, uv).rgb, 1.0);
+        } else if (u_preview_mode == 3) {
+          fragColor = vec4(texture(u_tex3, uv).rgb, 1.0);
+        } else {
+          vec2 subUv = fract(uv * 2.0);
+          float border = 1.0;
+          if (abs(uv.x - 0.5) < 0.003 || abs(uv.y - 0.5) < 0.003) {
+            border = 0.0;
+          }
+          vec4 col = vec4(0.0);
+          if (uv.x < 0.5 && uv.y >= 0.5) {
+            col = texture(u_tex0, subUv);
+          } else if (uv.x >= 0.5 && uv.y >= 0.5) {
+            col = texture(u_tex1, subUv);
+          } else if (uv.x < 0.5 && uv.y < 0.5) {
+            col = vec4(texture(u_tex2, subUv).rgb, 1.0);
+          } else {
+            col = vec4(texture(u_tex3, subUv).rgb, 1.0);
+          }
+          fragColor = col * border;
+        }
+      }
+      `;
+    } else {
+      // --- WebGL 1.0 Shaders (GLSL 1.00 ES for Mali-T628 / Legacy WebViews) ---
+      vsSource = `
+      attribute vec2 a_position;
+      varying vec2 v_uv;
+      void main() {
+        v_uv = a_position * 0.5 + 0.5;
+        gl_Position = vec4(a_position, 0.0, 1.0);
+      }
+      `;
+
+      const hasDrawBuffers = !!this.extDrawBuffers;
+      const extHeader = hasDrawBuffers ? '#extension GL_EXT_draw_buffers : require\n' : '';
+
+      fsSource = `
+      ${extHeader}
+      #ifdef GL_FRAGMENT_PRECISION_HIGH
+      precision highp float;
+      #else
+      precision mediump float;
+      #endif
+
+      varying vec2 v_uv;
+
+      uniform float u_time;
+      uniform vec2 u_resolution;
+      uniform int u_alu_complexity;
+      uniform int u_mrt_count;
+
+      float hash(vec2 p) {
+        p = fract(p * vec2(123.34, 456.21));
+        p += dot(p, p + 45.32);
+        return fract(p.x * p.y);
+      }
+
+      float noise(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        vec2 u = f * f * (3.0 - 2.0 * f);
+        return mix(
+          mix(hash(i + vec2(0.0, 0.0)), hash(i + vec2(1.0, 0.0)), u.x),
+          mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x),
+          u.y
+        );
+      }
+
+      void main() {
+        vec2 uv = v_uv;
+        vec2 aspectUv = (uv - 0.5) * vec2(u_resolution.x / max(u_resolution.y, 1.0), 1.0);
+        float t = u_time * 0.8;
+        vec2 p = aspectUv * 3.0;
+
+        float aluAccum = sin(p.x * 4.0 + t) * cos(p.y * 4.0 - t);
+        if (u_alu_complexity >= 1) {
+          float d = length(aspectUv);
+          aluAccum += sin(d * 18.0 - t * 3.0);
+          aluAccum += noise(uv * 8.0 + vec2(t * 0.2));
+        }
+
+        vec3 colA = vec3(0.08, 0.45, 0.95);
+        vec3 colB = vec3(0.98, 0.32, 0.15);
+        float pattern = 0.5 + 0.5 * sin(p.x * 3.0 + aluAccum * 1.5 + t);
+        vec3 albedo = mix(colA, colB, pattern);
+        vec4 t0 = vec4(albedo, 1.0);
+
+        vec2 nGrad = vec2(sin(p.x * 5.0 + t), cos(p.y * 5.0 - t)) * 0.6;
+        vec3 normal = normalize(vec3(nGrad, 1.0));
+        vec4 t1 = vec4(normal * 0.5 + 0.5, 0.5);
+
+        vec4 t2 = vec4(0.8, 0.9, 0.5, 1.0);
+        vec4 t3 = vec4(albedo * 1.5, 1.0);
+
+        #if defined(GL_EXT_draw_buffers)
+          gl_FragData[0] = t0;
+          if (u_mrt_count > 1) gl_FragData[1] = t1;
+          if (u_mrt_count > 2) gl_FragData[2] = t2;
+          if (u_mrt_count > 3) gl_FragData[3] = t3;
+        #else
+          gl_FragColor = t0;
+        #endif
+      }
+      `;
+
+      blitFsSource = `
+      #ifdef GL_FRAGMENT_PRECISION_HIGH
+      precision highp float;
+      #else
+      precision mediump float;
+      #endif
+
+      varying vec2 v_uv;
+      uniform sampler2D u_tex0;
+      uniform sampler2D u_tex1;
+      uniform sampler2D u_tex2;
+      uniform sampler2D u_tex3;
+      uniform int u_preview_mode;
+
+      void main() {
+        vec2 uv = v_uv;
+        if (u_preview_mode == 0) {
+          gl_FragColor = texture2D(u_tex0, uv);
+        } else if (u_preview_mode == 1) {
+          gl_FragColor = texture2D(u_tex1, uv);
+        } else if (u_preview_mode == 2) {
+          gl_FragColor = texture2D(u_tex2, uv);
+        } else if (u_preview_mode == 3) {
+          gl_FragColor = texture2D(u_tex3, uv);
+        } else {
+          vec2 subUv = fract(uv * 2.0);
+          float border = 1.0;
+          if (abs(uv.x - 0.5) < 0.003 || abs(uv.y - 0.5) < 0.003) border = 0.0;
+          vec4 col = vec4(0.0);
+          if (uv.x < 0.5 && uv.y >= 0.5) col = texture2D(u_tex0, subUv);
+          else if (uv.x >= 0.5 && uv.y >= 0.5) col = texture2D(u_tex1, subUv);
+          else if (uv.x < 0.5 && uv.y < 0.5) col = texture2D(u_tex2, subUv);
+          else col = texture2D(u_tex3, subUv);
+          gl_FragColor = col * border;
+        }
+      }
+      `;
     }
-    `;
 
     this.mtrProgram = this.createProgram(vsSource, fsSource);
     if (this.mtrProgram) {
@@ -271,61 +490,6 @@ export class WebGL2Engine {
       this.mrtUniforms.aluComplexity = gl.getUniformLocation(this.mtrProgram, 'u_alu_complexity');
       this.mrtUniforms.mrtCount = gl.getUniformLocation(this.mtrProgram, 'u_mrt_count');
     }
-
-    // 3. Blit / Presentation Program (Draw to screen with Split-Screen or Single Target preview)
-    const blitFsSource = `#version 300 es
-    precision highp float;
-
-    in vec2 v_uv;
-    out vec4 fragColor;
-
-    uniform sampler2D u_tex0;
-    uniform sampler2D u_tex1;
-    uniform sampler2D u_tex2;
-    uniform sampler2D u_tex3;
-    uniform int u_preview_mode; // 0=Target0, 1=Target1, 2=Target2, 3=Target3, 4=Split 4-way
-
-    void main() {
-      vec2 uv = v_uv;
-
-      if (u_preview_mode == 0) {
-        fragColor = texture(u_tex0, uv);
-      } else if (u_preview_mode == 1) {
-        fragColor = texture(u_tex1, uv);
-      } else if (u_preview_mode == 2) {
-        // Target 2 is Metallic, AO, Specular, Curvature -> show Metallic/AO combo
-        vec4 data = texture(u_tex2, uv);
-        fragColor = vec4(data.rgb, 1.0);
-      } else if (u_preview_mode == 3) {
-        vec4 data = texture(u_tex3, uv);
-        // Boost emissive presentation
-        fragColor = vec4(data.rgb, 1.0);
-      } else {
-        // Split 4-way view
-        // Top-Left: Target 0, Top-Right: Target 1
-        // Bottom-Left: Target 2, Bottom-Right: Target 3
-        vec2 subUv = fract(uv * 2.0);
-        
-        // Dark grid border separator
-        float borderX = step(0.003, abs(uv.x - 0.5));
-        float borderY = step(0.003, abs(uv.y - 0.5));
-        float border = borderX * borderY;
-
-        vec4 col = vec4(0.0);
-        if (uv.x < 0.5 && uv.y >= 0.5) {
-          col = texture(u_tex0, subUv); // Top-left: Albedo
-        } else if (uv.x >= 0.5 && uv.y >= 0.5) {
-          col = texture(u_tex1, subUv); // Top-right: Normal
-        } else if (uv.x < 0.5 && uv.y < 0.5) {
-          col = vec4(texture(u_tex2, subUv).rgb, 1.0); // Bottom-left: Material
-        } else {
-          col = vec4(texture(u_tex3, subUv).rgb, 1.0); // Bottom-right: Emissive
-        }
-
-        fragColor = col * border;
-      }
-    }
-    `;
 
     this.blitProgram = this.createProgram(vsSource, blitFsSource);
     if (this.blitProgram) {
@@ -341,24 +505,27 @@ export class WebGL2Engine {
     if (!this.gl) return;
     const gl = this.gl;
 
-    // Full screen quad / triangle (-1..1)
+    // Use standard 4-vertex TRIANGLE_STRIP quad (-1 to 1) for universal mobile GPU compatibility
     const vertices = new Float32Array([
       -1.0, -1.0,
-       3.0, -1.0,
-      -1.0,  3.0,
+       1.0, -1.0,
+      -1.0,  1.0,
+       1.0,  1.0,
     ]);
-
-    this.vao = gl.createVertexArray();
-    gl.bindVertexArray(this.vao);
 
     this.vbo = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
     gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
 
-    gl.enableVertexAttribArray(0);
-    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-
-    gl.bindVertexArray(null);
+    if (this.isWebGL2) {
+      const gl2 = gl as WebGL2RenderingContext;
+      this.vao = gl2.createVertexArray();
+      gl2.bindVertexArray(this.vao);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
+      gl.enableVertexAttribArray(0);
+      gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+      gl2.bindVertexArray(null);
+    }
     gl.bindBuffer(gl.ARRAY_BUFFER, null);
   }
 
@@ -366,7 +533,6 @@ export class WebGL2Engine {
     if (!this.gl || this.isContextLost) return false;
     const gl = this.gl;
 
-    // Destroy existing FBO and textures
     this.destroyTextures();
 
     this.currentWidth = width;
@@ -375,9 +541,11 @@ export class WebGL2Engine {
     this.fbo = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo);
 
+    // Limit active targets to device hardware maxDrawBuffers
+    const effectiveMrtCount = Math.min(config.mrtCount, this.maxDrawBuffers);
     const drawBuffers: number[] = [];
 
-    for (let i = 0; i < config.mrtCount; i++) {
+    for (let i = 0; i < effectiveMrtCount; i++) {
       const formatOption = config.formats[i];
       const tex = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -387,16 +555,16 @@ export class WebGL2Engine {
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
-      let internalFormat: GLenum = gl.RGBA8;
-      let format: GLenum = gl.RGBA;
-      let type: GLenum = gl.UNSIGNED_BYTE;
+      let internalFormat: number = gl.RGBA;
+      let format: number = gl.RGBA;
+      let type: number = gl.UNSIGNED_BYTE;
 
-      if (formatOption === 'RGBA16F') {
-        if (this.hasFloatColorBuffer) {
-          internalFormat = gl.RGBA16F;
-          type = gl.HALF_FLOAT;
-        } else {
-          console.warn('EXT_color_buffer_float not supported, fallback to RGBA8 for target', i);
+      if (this.isWebGL2) {
+        const gl2 = gl as WebGL2RenderingContext;
+        internalFormat = gl2.RGBA8;
+        if (formatOption === 'RGBA16F' && this.hasFloatColorBuffer) {
+          internalFormat = gl2.RGBA16F;
+          type = gl2.HALF_FLOAT;
         }
       }
 
@@ -412,28 +580,37 @@ export class WebGL2Engine {
         null
       );
 
-      const attachment = gl.COLOR_ATTACHMENT0 + i;
-      gl.framebufferTexture2D(
-        gl.FRAMEBUFFER,
-        attachment,
-        gl.TEXTURE_2D,
-        tex,
-        0
-      );
+      let attachment = gl.COLOR_ATTACHMENT0;
+      if (this.isWebGL2) {
+        attachment = (gl as WebGL2RenderingContext).COLOR_ATTACHMENT0 + i;
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, attachment, gl.TEXTURE_2D, tex, 0);
+        drawBuffers.push(attachment);
+      } else if (this.extDrawBuffers) {
+        attachment = this.extDrawBuffers.COLOR_ATTACHMENT0_WEBGL + i;
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, attachment, gl.TEXTURE_2D, tex, 0);
+        drawBuffers.push(attachment);
+      } else {
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+        drawBuffers.push(gl.COLOR_ATTACHMENT0);
+      }
 
-      drawBuffers.push(attachment);
       this.textures[i] = tex;
     }
 
-    // Unbound unused textures
-    for (let i = config.mrtCount; i < 4; i++) {
-      // Allocate 1x1 dummy black texture so blit shader has a valid sampler
+    // Allocate 1x1 dummy black textures with EXPLICIT NEAREST filters for unused slots
+    // This prevents incomplete texture errors on Mali and PowerVR!
+    for (let i = effectiveMrtCount; i < 4; i++) {
       const dummy = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_2D, dummy);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
       gl.texImage2D(
         gl.TEXTURE_2D,
         0,
-        gl.RGBA8,
+        gl.RGBA,
         1,
         1,
         0,
@@ -444,13 +621,17 @@ export class WebGL2Engine {
       this.textures[i] = dummy;
     }
 
-    gl.drawBuffers(drawBuffers);
+    if (this.isWebGL2) {
+      (gl as WebGL2RenderingContext).drawBuffers(drawBuffers);
+    } else if (this.extDrawBuffers && drawBuffers.length > 0) {
+      this.extDrawBuffers.drawBuffersWEBGL(drawBuffers);
+    }
 
     const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
     if (status !== gl.FRAMEBUFFER_COMPLETE) {
-      console.error('WebGL 2.0 Framebuffer incomplete status:', status);
+      console.warn('Framebuffer status not complete:', status);
       return false;
     }
 
@@ -463,6 +644,7 @@ export class WebGL2Engine {
 
     const aluComplexityIndex = config.aluComplexity === 'low' ? 0 : config.aluComplexity === 'medium' ? 1 : 2;
     const passes = Math.max(1, config.passes || 1);
+    const effectiveMrtCount = Math.min(config.mrtCount, this.maxDrawBuffers);
 
     // 1. Render to MRT Framebuffer
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo);
@@ -472,13 +654,19 @@ export class WebGL2Engine {
     gl.uniform1f(this.mrtUniforms.time, time);
     gl.uniform2f(this.mrtUniforms.resolution, this.currentWidth, this.currentHeight);
     gl.uniform1i(this.mrtUniforms.aluComplexity, aluComplexityIndex);
-    gl.uniform1i(this.mrtUniforms.mrtCount, config.mrtCount);
+    gl.uniform1i(this.mrtUniforms.mrtCount, effectiveMrtCount);
 
-    gl.bindVertexArray(this.vao);
+    if (this.isWebGL2 && this.vao) {
+      (gl as WebGL2RenderingContext).bindVertexArray(this.vao);
+    } else {
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
+      gl.enableVertexAttribArray(0);
+      gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    }
 
-    // Overdraw stress loop
+    // Overdraw passes
     for (let p = 0; p < passes; p++) {
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     }
 
     // 2. Blit / Present Target to Default Framebuffer (Screen Canvas)
@@ -487,7 +675,6 @@ export class WebGL2Engine {
 
     gl.useProgram(this.blitProgram);
 
-    // Bind texture attachments to texture units 0..3
     for (let i = 0; i < 4; i++) {
       gl.activeTexture(gl.TEXTURE0 + i);
       gl.bindTexture(gl.TEXTURE_2D, this.textures[i]);
@@ -504,22 +691,33 @@ export class WebGL2Engine {
     else if (config.previewTarget === 'target3') previewMode = 3;
     else if (config.previewTarget === 'split') previewMode = 4;
 
-    // If previewing a target beyond current MRT count and not split, clamp to 0
-    if (previewMode < 4 && previewMode >= config.mrtCount) {
+    if (previewMode < 4 && previewMode >= effectiveMrtCount) {
       previewMode = 0;
     }
 
     gl.uniform1i(this.blitUniforms.previewMode, previewMode);
 
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-    gl.bindVertexArray(null);
+    if (this.isWebGL2 && this.vao) {
+      (gl as WebGL2RenderingContext).bindVertexArray(this.vao);
+    } else {
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
+      gl.enableVertexAttribArray(0);
+      gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    }
+
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+    if (this.isWebGL2 && this.vao) {
+      (gl as WebGL2RenderingContext).bindVertexArray(null);
+    }
   }
 
   private createProgram(vsSource: string, fsSource: string): WebGLProgram | null {
     if (!this.gl) return null;
     const gl = this.gl;
 
-    const vs = gl.createShader(gl.VERTEX_SHADER)!;
+    const vs = gl.createShader(gl.VERTEX_SHADER);
+    if (!vs) return null;
     gl.shaderSource(vs, vsSource);
     gl.compileShader(vs);
     if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) {
@@ -528,16 +726,26 @@ export class WebGL2Engine {
       return null;
     }
 
-    const fs = gl.createShader(gl.FRAGMENT_SHADER)!;
+    const fs = gl.createShader(gl.FRAGMENT_SHADER);
+    if (!fs) {
+      gl.deleteShader(vs);
+      return null;
+    }
     gl.shaderSource(fs, fsSource);
     gl.compileShader(fs);
     if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
       console.error('Fragment Shader Error:', gl.getShaderInfoLog(fs));
+      gl.deleteShader(vs);
       gl.deleteShader(fs);
       return null;
     }
 
-    const prog = gl.createProgram()!;
+    const prog = gl.createProgram();
+    if (!prog) {
+      gl.deleteShader(vs);
+      gl.deleteShader(fs);
+      return null;
+    }
     gl.attachShader(prog, vs);
     gl.attachShader(prog, fs);
     gl.linkProgram(prog);
@@ -583,8 +791,8 @@ export class WebGL2Engine {
         this.gl.deleteBuffer(this.vbo);
         this.vbo = null;
       }
-      if (this.vao) {
-        this.gl.deleteVertexArray(this.vao);
+      if (this.isWebGL2 && this.vao) {
+        (this.gl as WebGL2RenderingContext).deleteVertexArray(this.vao);
         this.vao = null;
       }
     }

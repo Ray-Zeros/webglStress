@@ -7,8 +7,8 @@ interface MetricsPanelProps {
   metrics: MetricsSnapshot;
   deviceInfo: GpuDeviceInfo;
   isBenchmarking: boolean;
-  benchmarkProgress: number; // 0 to 100
-  benchmarkCountdown: number; // seconds remaining
+  benchmarkProgress: number;
+  benchmarkCountdown: number;
   onResetMetrics: () => void;
   onStartBenchmark: () => void;
   onStopBenchmark: () => void;
@@ -27,15 +27,15 @@ export const MetricsPanel: React.FC<MetricsPanelProps> = ({
   onOpenGpuInfo,
 }) => {
   return (
-    <div className="flex flex-col gap-3 rounded-2xl border border-slate-800/80 bg-slate-950/85 p-4 backdrop-blur-md shadow-2xl text-slate-100 max-w-sm sm:max-w-md w-full">
+    <div className="flex flex-col gap-3 rounded-2xl border border-slate-800 bg-[#090d16] p-3.5 sm:p-4 shadow-2xl text-slate-100 max-w-sm sm:max-w-md w-full">
       {/* Top Device Bar */}
-      <div className="flex items-center justify-between border-b border-slate-800/60 pb-3">
+      <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
         <button
           onClick={onOpenGpuInfo}
           className="flex items-center gap-2 group text-left hover:opacity-90 transition max-w-[70%]"
           title="Click to view full GPU hardware specs"
         >
-          <div className="p-1.5 rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 group-hover:bg-cyan-500/20 transition">
+          <div className="p-1.5 rounded-lg bg-cyan-950 text-cyan-400 border border-cyan-800 group-hover:bg-cyan-900 transition">
             <Cpu className="w-4 h-4" />
           </div>
           <div className="min-w-0">
@@ -56,7 +56,7 @@ export const MetricsPanel: React.FC<MetricsPanelProps> = ({
         <div className="flex items-center gap-1.5">
           <button
             onClick={onResetMetrics}
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-850 hover:bg-slate-800 text-[11px] font-medium text-slate-300 hover:text-white border border-slate-700/60 transition"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-[11px] font-medium text-slate-300 hover:text-white border border-slate-800 transition"
             title="Reset 10-second rolling metrics"
           >
             <RotateCcw className="w-3.5 h-3.5" />
@@ -66,7 +66,7 @@ export const MetricsPanel: React.FC<MetricsPanelProps> = ({
           {isBenchmarking ? (
             <button
               onClick={onStopBenchmark}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-600/90 hover:bg-rose-500 text-[11px] font-bold text-white shadow-lg shadow-rose-600/30 transition animate-pulse"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-[11px] font-bold text-white shadow-lg transition animate-pulse"
             >
               <Square className="w-3.5 h-3.5 fill-current" />
               <span>{benchmarkCountdown}s</span>
@@ -74,7 +74,7 @@ export const MetricsPanel: React.FC<MetricsPanelProps> = ({
           ) : (
             <button
               onClick={onStartBenchmark}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-[11px] font-bold text-white shadow-lg shadow-cyan-600/25 transition"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-[11px] font-bold text-white shadow-lg shadow-cyan-900/40 transition"
               title="Run a standardized 10-second stress benchmark and get report"
             >
               <Play className="w-3.5 h-3.5 fill-current" />
@@ -84,7 +84,7 @@ export const MetricsPanel: React.FC<MetricsPanelProps> = ({
         </div>
       </div>
 
-      {/* Benchmark Progress Bar (when active) */}
+      {/* Benchmark Progress Bar */}
       {isBenchmarking && (
         <div className="space-y-1">
           <div className="flex justify-between text-[10px] font-mono text-cyan-300">
@@ -93,7 +93,7 @@ export const MetricsPanel: React.FC<MetricsPanelProps> = ({
           </div>
           <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
             <div
-              className="h-full bg-gradient-to-r from-cyan-400 to-indigo-500 transition-all duration-150"
+              className="h-full bg-cyan-500 transition-all duration-150"
               style={{ width: `${benchmarkProgress}%` }}
             />
           </div>
@@ -101,9 +101,8 @@ export const MetricsPanel: React.FC<MetricsPanelProps> = ({
       )}
 
       {/* Primary KPI Metrics: FPS / 10s Avg / 1% Low */}
-      <div className="grid grid-cols-3 gap-2.5">
-        {/* Instant FPS */}
-        <div className="rounded-xl border border-slate-800/80 bg-slate-900/60 p-2.5">
+      <div className="grid grid-cols-3 gap-2">
+        <div className="rounded-xl border border-slate-800 bg-[#0f172a] p-2 sm:p-2.5">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">
               Real-time
@@ -118,42 +117,40 @@ export const MetricsPanel: React.FC<MetricsPanelProps> = ({
           </div>
         </div>
 
-        {/* 10s Window Avg FPS */}
-        <div className="rounded-xl border border-cyan-500/25 bg-cyan-950/20 p-2.5 relative overflow-hidden">
+        <div className="rounded-xl border border-cyan-800 bg-[#0c1f38] p-2 sm:p-2.5">
           <div className="text-[10px] font-medium text-cyan-300 uppercase tracking-wider">
             10s Avg FPS
           </div>
           <div className="text-xl sm:text-2xl font-black font-mono text-cyan-400 mt-0.5">
             {metrics.windowAvgFps.toFixed(1)}
           </div>
-          <div className="text-[10px] text-cyan-400/80 font-mono">
+          <div className="text-[10px] text-cyan-300/80 font-mono">
             {metrics.windowAvgFrameTime.toFixed(1)} ms avg
           </div>
         </div>
 
-        {/* 1% Low FPS (P99 Frame Time) */}
-        <div className="rounded-xl border border-amber-500/25 bg-amber-950/20 p-2.5">
+        <div className="rounded-xl border border-amber-800 bg-[#2b1f0c] p-2 sm:p-2.5">
           <div className="text-[10px] font-medium text-amber-300 uppercase tracking-wider">
             1% Low FPS
           </div>
           <div className="text-xl sm:text-2xl font-black font-mono text-amber-400 mt-0.5">
             {metrics.onePercentLowFps.toFixed(1)}
           </div>
-          <div className="text-[10px] text-amber-400/80 font-mono">
+          <div className="text-[10px] text-amber-300/80 font-mono">
             P99: {metrics.p99FrameTime.toFixed(1)} ms
           </div>
         </div>
       </div>
 
       {/* Theoretical Bandwidth & Throughput Card */}
-      <div className="rounded-xl border border-emerald-500/20 bg-emerald-950/15 p-3 flex items-center justify-between">
+      <div className="rounded-xl border border-emerald-900 bg-[#06241a] p-2.5 sm:p-3 flex items-center justify-between">
         <div className="space-y-0.5">
           <div className="flex items-center gap-1.5 text-[10px] font-semibold text-emerald-400 uppercase tracking-wider">
             <Zap className="w-3.5 h-3.5" />
             <span>Theoretical Write Bandwidth</span>
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-black font-mono text-emerald-300">
+            <span className="text-xl sm:text-2xl font-black font-mono text-emerald-300">
               {metrics.theoreticalBandwidthGBps.toFixed(2)}
             </span>
             <span className="text-xs font-mono text-emerald-400/80">GB/s</span>

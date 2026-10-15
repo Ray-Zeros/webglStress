@@ -14,7 +14,7 @@ export default defineConfig(() => {
         targets: ['chrome >= 49', 'android >= 4.4'],
       }),
     ],
-    base: '/webglStress/', 
+    base: './', 
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

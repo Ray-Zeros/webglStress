@@ -38,7 +38,7 @@ export default function App() {
     resolutionPreset: '1080p',
     customWidth: 1920,
     customHeight: 1080,
-    aluComplexity: 'low', // default low for pure bandwidth saturation
+    aluComplexity: 'low',
     passes: 1,
     previewTarget: 'target0',
     isPaused: false,
@@ -105,25 +105,35 @@ export default function App() {
       case '4k':
         return { width: 3840, height: 2160 };
       case 'native': {
-        const dpr = Math.min(2, window.devicePixelRatio || 1);
+        const dpr = Math.min(2, (typeof window !== 'undefined' && window.devicePixelRatio) || 1);
         const w = Math.round(window.innerWidth * dpr);
         const h = Math.round(window.innerHeight * dpr);
-        return { width: Math.max(640, w), height: Math.max(360, h) };
+        return { width: Math.max(320, w), height: Math.max(240, h) };
       }
       case 'custom':
         return {
-          width: Math.max(64, Math.min(7680, config.customWidth)),
-          height: Math.max(64, Math.min(4320, config.customHeight)),
+          width: Math.max(64, Math.min(7680, config.customWidth || 1920)),
+          height: Math.max(64, Math.min(4320, config.customHeight || 1080)),
         };
       default:
         return { width: 1920, height: 1080 };
     }
   }, [config.resolutionPreset, config.customWidth, config.customHeight]);
 
-  // Check WebGPU support on mount
+  // Deep async probe for WebGPU availability on mount
   useEffect(() => {
-    const supported = WebGPUEngine.isSupported();
-    setWebgpuSupported(supported);
+    let isMounted = true;
+    WebGPUEngine.checkAvailability().then((res) => {
+      if (isMounted) {
+        setWebgpuSupported(res.supported);
+        if (!res.supported && res.reason) {
+          console.info('WebGPU status:', res.reason);
+        }
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   // Fullscreen change listener
@@ -169,12 +179,6 @@ export default function App() {
       canvas.height = targetRes.height;
 
       if (config.api === 'webgpu') {
-        if (!WebGPUEngine.isSupported()) {
-          setWebgpuFallbackWarning('WebGPU is unsupported in this browser environment. Gracefully falling back to WebGL 2.0.');
-          setConfig((prev) => ({ ...prev, api: 'webgl2' }));
-          return;
-        }
-
         const engine = new WebGPUEngine(canvas, () => {
           if (active) setIsContextLost(true);
         });
@@ -186,7 +190,9 @@ export default function App() {
         }
 
         if (!success) {
-          setWebgpuFallbackWarning('WebGPU device initialization failed on this GPU. Falling back to WebGL 2.0.');
+          setWebgpuFallbackWarning(
+            'WebGPU adapter initialization failed on this device/browser. Falling back to WebGL 2.0.'
+          );
           setConfig((prev) => ({ ...prev, api: 'webgl2' }));
           return;
         }
@@ -195,9 +201,11 @@ export default function App() {
         engine.updateTargets(targetRes.width, targetRes.height, config);
         setDeviceInfo(engine.getDeviceInfo());
       } else {
-        // WebGL 2.0
+        // WebGL 2.0 or WebGL 1.0
+        const preferredApi: GraphicsAPI = config.api === 'webgl1' ? 'webgl1' : 'webgl2';
         const engine = new WebGL2Engine(
           canvas,
+          preferredApi,
           () => {
             if (active) setIsContextLost(true);
           },
@@ -210,20 +218,27 @@ export default function App() {
         );
 
         webgl2EngineRef.current = engine;
-        const success = engine.updateTargets(targetRes.width, targetRes.height, config);
-        if (!success) {
-          console.warn('WebGL2 MRT setup incomplete.');
+        const activeApi = engine.getActiveApi();
+
+        // If WebGL 2.0 was requested but Mali/driver only supports WebGL 1.0, update config state
+        if (activeApi !== config.api) {
+          setConfig((prev) => ({ ...prev, api: activeApi }));
+          if (activeApi === 'webgl1') {
+            setWebgpuFallbackWarning(
+              'WebGL 2.0 unsupported by GPU driver (e.g. legacy ARM Mali); successfully fell back to WebGL 1.0.'
+            );
+          }
         }
 
+        engine.updateTargets(targetRes.width, targetRes.height, config);
         const devInfo = engine.getDeviceInfo();
         setDeviceInfo(devInfo);
 
-        // Check if RGBA16F was selected without extension
         if (!devInfo.hasFloatColorBuffer) {
           const hasFloatTargets = config.formats.slice(0, config.mrtCount).some((f) => f === 'RGBA16F');
           if (hasFloatTargets) {
             setWebgpuFallbackWarning(
-              'EXT_color_buffer_float is unsupported on this WebGL 2.0 driver. Floating-point RGBA16F MRTs will fall back to RGBA8.'
+              'EXT_color_buffer_float is unsupported on this GPU driver. RGBA16F MRT targets will fall back to RGBA8.'
             );
           }
         }
@@ -241,7 +256,7 @@ export default function App() {
           const timeSec = (timestamp - startTimeRef.current) / 1000;
           if (config.api === 'webgpu' && webgpuEngineRef.current) {
             webgpuEngineRef.current.render(timeSec, config);
-          } else if (config.api === 'webgl2' && webgl2EngineRef.current) {
+          } else if (webgl2EngineRef.current) {
             webgl2EngineRef.current.render(timeSec, config);
           }
         }
@@ -265,12 +280,16 @@ export default function App() {
       active = false;
       teardownEngines();
     };
-  }, [config.api, config.resolutionPreset, config.customWidth, config.customHeight, config.mrtCount, config.formats]);
-
-  // Handle updates to non-pipeline parameters (ALU, passes, previewTarget, isPaused)
-  useEffect(() => {
-    // If resolution or target count changes, the previous useEffect handles it.
-  }, [config.aluComplexity, config.passes, config.previewTarget, config.isPaused]);
+  }, [
+    config.api,
+    config.resolutionPreset,
+    config.customWidth,
+    config.customHeight,
+    config.mrtCount,
+    config.formats,
+    computeResolution,
+    teardownEngines,
+  ]);
 
   // 10-Second Benchmark Run Timer
   useEffect(() => {
@@ -278,7 +297,7 @@ export default function App() {
 
     metricsEngineRef.current.reset();
     const benchmarkStart = performance.now();
-    const duration = 10000; // 10 seconds
+    const duration = 10000;
 
     const timer = setInterval(() => {
       const elapsed = performance.now() - benchmarkStart;
@@ -292,7 +311,6 @@ export default function App() {
         clearInterval(timer);
         setIsBenchmarking(false);
 
-        // Capture snapshot
         const res = computeResolution();
         const finalSnap = metricsEngineRef.current.getSnapshot(config, res.width, res.height);
 

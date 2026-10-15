@@ -40,27 +40,88 @@ export class WebGPUEngine {
     return typeof navigator !== 'undefined' && 'gpu' in navigator && !!navigator.gpu;
   }
 
+  public static async checkAvailability(): Promise<{ supported: boolean; reason?: string }> {
+    if (typeof navigator === 'undefined' || !navigator.gpu) {
+      return {
+        supported: false,
+        reason: 'navigator.gpu not found in browser. WebGPU is either unsupported or disabled in browser flags.',
+      };
+    }
+
+    try {
+      let adapter: GPUAdapter | null = null;
+      try {
+        adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+      } catch (e: any) {
+        // In iframe or restricted environments, might throw SecurityError
+        return {
+          supported: false,
+          reason: `WebGPU requestAdapter blocked: ${e?.message || 'Access restricted'}`,
+        };
+      }
+
+      if (!adapter) {
+        adapter = await navigator.gpu.requestAdapter();
+      }
+      if (!adapter) {
+        adapter = await navigator.gpu.requestAdapter({ powerPreference: 'low-power' });
+      }
+
+      if (!adapter) {
+        return {
+          supported: false,
+          reason: 'No WebGPU adapter returned by browser (GPU driver may be blacklisted or hardware unsupported).',
+        };
+      }
+
+      return { supported: true };
+    } catch (err: any) {
+      return {
+        supported: false,
+        reason: err?.message || 'WebGPU verification failed.',
+      };
+    }
+  }
+
   public async init(): Promise<boolean> {
     if (!WebGPUEngine.isSupported()) {
       return false;
     }
 
     try {
-      const adapter = await navigator.gpu.requestAdapter({
-        powerPreference: 'high-performance',
-      });
+      // 1. Multi-strategy adapter query
+      let adapter: GPUAdapter | null = null;
+      try {
+        adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+      } catch (e) {
+        console.warn('requestAdapter high-performance failed:', e);
+      }
 
       if (!adapter) {
-        console.warn('WebGPU: No suitable GPU adapter found.');
+        try {
+          adapter = await navigator.gpu.requestAdapter();
+        } catch (e) {
+          console.warn('requestAdapter default failed:', e);
+        }
+      }
+
+      if (!adapter) {
+        try {
+          adapter = await navigator.gpu.requestAdapter({ powerPreference: 'low-power' });
+        } catch (e) {
+          console.warn('requestAdapter low-power failed:', e);
+        }
+      }
+
+      if (!adapter) {
+        console.warn('WebGPU: No suitable GPU adapter found on this system.');
         return false;
       }
 
       this.adapter = adapter;
 
-      const device = await adapter.requestDevice({
-        requiredFeatures: [],
-        requiredLimits: {},
-      });
+      // 2. Request device with permissive default options
+      const device = await adapter.requestDevice();
 
       this.device = device;
       this.isDeviceLost = false;
@@ -91,10 +152,8 @@ export class WebGPUEngine {
         alphaMode: 'opaque',
       });
 
-      // Cache device info
       await this.extractDeviceInfo();
 
-      // Create reusable sampler
       this.sampler = this.device.createSampler({
         magFilter: 'nearest',
         minFilter: 'nearest',
@@ -102,14 +161,11 @@ export class WebGPUEngine {
         addressModeV: 'clamp-to-edge',
       });
 
-      // Uniform buffers
-      // MRT Uniforms: time (f32), aluComplexity (u32), resX (f32), resY (f32), mrtCount (u32), pad1, pad2, pad3 = 32 bytes
       this.mrtUniformBuffer = this.device.createBuffer({
         size: 32,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       });
 
-      // Blit Uniforms: previewMode (u32), pad1, pad2, pad3 = 16 bytes
       this.blitUniformBuffer = this.device.createBuffer({
         size: 16,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
@@ -163,7 +219,7 @@ export class WebGPUEngine {
       driver,
       maxDrawBuffers,
       maxTextureSize,
-      hasFloatColorBuffer: true, // rgba16float is renderable in WebGPU core spec
+      hasFloatColorBuffer: true,
       webgpuSupported: true,
       features: featuresList,
     };
@@ -192,10 +248,8 @@ export class WebGPUEngine {
     this.currentWidth = width;
     this.currentHeight = height;
 
-    // Destroy previous target textures
     this.destroyTargetTextures();
 
-    // 1. Create target textures matching format & count
     const targetFormats: GPUTextureFormat[] = [];
     for (let i = 0; i < config.mrtCount; i++) {
       const formatOpt = config.formats[i];
@@ -212,7 +266,6 @@ export class WebGPUEngine {
       this.targetViews[i] = texture.createView();
     }
 
-    // 2. Create 1x1 dummy textures for unused slots (so blit shader can sample all 4 targets)
     for (let i = config.mrtCount; i < 4; i++) {
       const dummy = this.device.createTexture({
         size: [1, 1, 1],
@@ -223,13 +276,8 @@ export class WebGPUEngine {
       this.dummyViews[i] = dummy.createView();
     }
 
-    // 3. Build MRT pipeline matching the active target count and formats
     this.buildMrtPipeline(config.mrtCount, targetFormats);
-
-    // 4. Build Blit pipeline
     this.buildBlitPipeline();
-
-    // 5. Update bind groups
     this.updateBindGroups();
 
     return true;
@@ -238,15 +286,15 @@ export class WebGPUEngine {
   private buildMrtPipeline(mrtCount: number, formats: GPUTextureFormat[]): void {
     if (!this.device) return;
 
-    // Generate output struct and returns according to mrtCount
     let outputStructMembers = '';
     let outputAssignments = '';
 
     for (let i = 0; i < mrtCount; i++) {
-      outputStructMembers += `  @location(${i}) target${i}: vec4f,\n`;
+      outputStructMembers += `  @location(${i}) target${i}: vec4<f32>,\n`;
       outputAssignments += `  out.target${i} = target${i};\n`;
     }
 
+    // Standard cross-compatible WGSL (using vec2<f32>, vec3<f32>, vec4<f32> for universal browser support)
     const wgslShader = `
     struct Uniforms {
       time: f32,
@@ -262,21 +310,22 @@ export class WebGPUEngine {
     @group(0) @binding(0) var<uniform> u: Uniforms;
 
     struct VertexOutput {
-      @builtin(position) position: vec4f,
-      @location(0) uv: vec2f,
+      @builtin(position) position: vec4<f32>,
+      @location(0) uv: vec2<f32>,
     };
 
     @vertex
     fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
-      var pos = array<vec2f, 3>(
-        vec2f(-1.0, -1.0),
-        vec2f( 3.0, -1.0),
-        vec2f(-1.0,  3.0)
+      var pos = array<vec2<f32>, 4>(
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>( 1.0, -1.0),
+        vec2<f32>(-1.0,  1.0),
+        vec2<f32>( 1.0,  1.0)
       );
       var out: VertexOutput;
       let p = pos[vertexIndex];
-      out.position = vec4f(p, 0.0, 1.0);
-      out.uv = p * 0.5 + vec2f(0.5);
+      out.position = vec4<f32>(p, 0.0, 1.0);
+      out.uv = p * 0.5 + vec2<f32>(0.5, 0.5);
       return out;
     }
 
@@ -284,85 +333,83 @@ export class WebGPUEngine {
 ${outputStructMembers}
     };
 
-    fn hash2(p: vec2f) -> f32 {
-      var p3 = fract(p * vec2f(123.34, 456.21));
+    fn hash2(p: vec2<f32>) -> f32 {
+      var p3 = fract(p * vec2<f32>(123.34, 456.21));
       p3 += dot(p3, p3 + 45.32);
       return fract(p3.x * p3.y);
     }
 
-    fn noise2(p: vec2f) -> f32 {
+    fn noise2(p: vec2<f32>) -> f32 {
       let i = floor(p);
       let f = fract(p);
       let u_curve = f * f * (3.0 - 2.0 * f);
       return mix(
-        mix(hash2(i + vec2f(0.0, 0.0)), hash2(i + vec2f(1.0, 0.0)), u_curve.x),
-        mix(hash2(i + vec2f(0.0, 1.0)), hash2(i + vec2f(1.0, 1.0)), u_curve.x),
+        mix(hash2(i + vec2<f32>(0.0, 0.0)), hash2(i + vec2<f32>(1.0, 0.0)), u_curve.x),
+        mix(hash2(i + vec2<f32>(0.0, 1.0)), hash2(i + vec2<f32>(1.0, 1.0)), u_curve.x),
         u_curve.y
       );
     }
 
     @fragment
-    fn fs_main(in: VertexOutput) -> GBufferOutput {
-      let uv = in.uv;
-      let aspectUv = (uv - 0.5) * vec2f(u.resX / u.resY, 1.0);
+    fn fs_main(in_val: VertexOutput) -> GBufferOutput {
+      let uv = in_val.uv;
+      let aspectUv = (uv - 0.5) * vec2<f32>(u.resX / max(u.resY, 1.0), 1.0);
       let t = u.time * 0.8;
       let p = aspectUv * 3.0;
 
       var aluAccum: f32 = 0.0;
       if (u.aluComplexity == 0u) {
-        // Low ALU: pure memory write saturation
         aluAccum = sin(p.x * 4.0 + t) * cos(p.y * 4.0 - t);
       } else if (u.aluComplexity == 1u) {
-        // Medium ALU: procedural wave interference + noise
         let d = length(aspectUv);
         aluAccum = sin(d * 18.0 - t * 3.0) + cos(aspectUv.x * 12.0 + t) * sin(aspectUv.y * 12.0 - t);
-        aluAccum += noise2(uv * 8.0 + vec2f(t * 0.2));
+        aluAccum += noise2(uv * 8.0 + vec2<f32>(t * 0.2, t * 0.2));
       } else {
-        // Heavy ALU: 7 octave loop + rotation
         var q = uv * 6.0;
         var amp: f32 = 1.0;
         let c = cos(0.5);
         let s = sin(0.5);
         for (var i: i32 = 0; i < 7; i = i + 1) {
-          aluAccum += amp * noise2(q + vec2f(t * 0.3, -t * 0.2));
+          aluAccum += amp * noise2(q + vec2<f32>(t * 0.3, -t * 0.2));
           let rx = c * q.x - s * q.y;
           let ry = s * q.x + c * q.y;
-          q = vec2f(rx, ry) * 2.02 + vec2f(f32(i) * 1.7);
+          q = vec2<f32>(rx, ry) * 2.02 + vec2<f32>(f32(i) * 1.7, f32(i) * 1.7);
           amp *= 0.5;
         }
         aluAccum += sin(aspectUv.x * 24.0 + aluAccum * 3.0) * cos(aspectUv.y * 24.0 - aluAccum * 3.0);
       }
 
       // Target 0: Albedo
-      let colA = vec3f(0.08, 0.45, 0.95);
-      let colB = vec3f(0.98, 0.32, 0.15);
-      let colC = vec3f(0.12, 0.85, 0.55);
+      let colA = vec3<f32>(0.08, 0.45, 0.95);
+      let colB = vec3<f32>(0.98, 0.32, 0.15);
+      let colC = vec3<f32>(0.12, 0.85, 0.55);
       let pattern = 0.5 + 0.5 * sin(p.x * 3.0 + aluAccum * 1.5 + t);
       let albedo = mix(colA, mix(colB, colC, sin(t * 0.5) * 0.5 + 0.5), pattern);
-      let target0 = vec4f(albedo, 1.0);
+      let target0 = vec4<f32>(albedo, 1.0);
 
       // Target 1: World Normal + Roughness
-      let nGrad = vec2f(
+      let nGrad = vec2<f32>(
         sin(p.x * 5.0 + t + aluAccum),
         cos(p.y * 5.0 - t + aluAccum)
       ) * 0.6;
-      let normal = normalize(vec3f(nGrad, 1.0));
-      let normalEncoded = normal * 0.5 + vec3f(0.5);
+      let normal = normalize(vec3<f32>(nGrad, 1.0));
+      let normalEncoded = normal * 0.5 + vec3<f32>(0.5, 0.5, 0.5);
       let roughness = clamp(0.1 + 0.8 * abs(sin(aluAccum * 2.0 + t * 0.5)), 0.05, 0.95);
-      let target1 = vec4f(normalEncoded, roughness);
+      let target1 = vec4<f32>(normalEncoded, roughness);
 
       // Target 2: Metallic, AO, Specular, Curvature
       let metallic = clamp(sin(p.y * 4.0 - t * 0.7) * 0.5 + 0.5, 0.0, 1.0);
       let ao = clamp(1.0 - length(aspectUv) * 0.4 + aluAccum * 0.15, 0.2, 1.0);
-      let target2 = vec4f(metallic, ao, 0.5, abs(normal.x * normal.y));
+      let target2 = vec4<f32>(metallic, ao, 0.5, abs(normal.x * normal.y));
 
       // Target 3: Emissive / Velocity Vector
-      let grid = abs(fract(aspectUv * 6.0 - vec2f(t * 0.2, t * 0.1)) - 0.5) / fwidth(aspectUv * 6.0);
+      let fw = max(fwidth(aspectUv * 6.0), vec2<f32>(0.001, 0.001));
+      let grid = abs(fract(aspectUv * 6.0 - vec2<f32>(t * 0.2, t * 0.1)) - 0.5) / fw;
       let line = min(grid.x, grid.y);
       let emissiveMask = 1.0 - min(line, 1.0);
-      let emissive = vec3f(0.2, 0.9, 1.0) * emissiveMask * 2.5;
-      let velocity = vec2f(sin(t), cos(t)) * 0.016;
-      let target3 = vec4f(emissive.xy + velocity, emissive.z, 1.0);
+      let emissive = vec3<f32>(0.2, 0.9, 1.0) * emissiveMask * 2.5;
+      let velocity = vec2<f32>(sin(t), cos(t)) * 0.016;
+      let target3 = vec4<f32>(emissive.x + velocity.x, emissive.y + velocity.y, emissive.z, 1.0);
 
       var out: GBufferOutput;
 ${outputAssignments}
@@ -388,7 +435,7 @@ ${outputAssignments}
         targets: colorTargets,
       },
       primitive: {
-        topology: 'triangle-list',
+        topology: 'triangle-strip',
       },
     });
   }
@@ -412,27 +459,28 @@ ${outputAssignments}
     @group(0) @binding(5) var t3: texture_2d<f32>;
 
     struct VertexOutput {
-      @builtin(position) position: vec4f,
-      @location(0) uv: vec2f,
+      @builtin(position) position: vec4<f32>,
+      @location(0) uv: vec2<f32>,
     };
 
     @vertex
     fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
-      var pos = array<vec2f, 3>(
-        vec2f(-1.0, -1.0),
-        vec2f( 3.0, -1.0),
-        vec2f(-1.0,  3.0)
+      var pos = array<vec2<f32>, 4>(
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>( 1.0, -1.0),
+        vec2<f32>(-1.0,  1.0),
+        vec2<f32>( 1.0,  1.0)
       );
       var out: VertexOutput;
       let p = pos[vertexIndex];
-      out.position = vec4f(p, 0.0, 1.0);
-      out.uv = p * 0.5 + vec2f(0.5);
+      out.position = vec4<f32>(p, 0.0, 1.0);
+      out.uv = p * 0.5 + vec2<f32>(0.5, 0.5);
       return out;
     }
 
     @fragment
-    fn fs_main(in: VertexOutput) -> @location(0) vec4f {
-      let uv = in.uv;
+    fn fs_main(in_val: VertexOutput) -> @location(0) vec4<f32> {
+      let uv = in_val.uv;
 
       if (bu.previewMode == 0u) {
         return textureSample(t0, s, uv);
@@ -440,28 +488,28 @@ ${outputAssignments}
         return textureSample(t1, s, uv);
       } else if (bu.previewMode == 2u) {
         let d = textureSample(t2, s, uv);
-        return vec4f(d.rgb, 1.0);
+        return vec4<f32>(d.rgb, 1.0);
       } else if (bu.previewMode == 3u) {
         let d = textureSample(t3, s, uv);
-        return vec4f(d.rgb, 1.0);
+        return vec4<f32>(d.rgb, 1.0);
       } else {
-        // Split 4-way view
         let subUv = fract(uv * 2.0);
-        let borderX = select(1.0, 0.0, abs(uv.x - 0.5) < 0.003);
-        let borderY = select(1.0, 0.0, abs(uv.y - 0.5) < 0.003);
-        let border = borderX * borderY;
+        var border: f32 = 1.0;
+        if (abs(uv.x - 0.5) < 0.003 || abs(uv.y - 0.5) < 0.003) {
+          border = 0.0;
+        }
 
-        var col = vec4f(0.0);
+        var col: vec4<f32> = vec4<f32>(0.0, 0.0, 0.0, 1.0);
         if (uv.x < 0.5 && uv.y < 0.5) {
-          col = textureSample(t0, s, subUv); // Top-left
+          col = textureSample(t0, s, subUv);
         } else if (uv.x >= 0.5 && uv.y < 0.5) {
-          col = textureSample(t1, s, subUv); // Top-right
+          col = textureSample(t1, s, subUv);
         } else if (uv.x < 0.5 && uv.y >= 0.5) {
-          let d = textureSample(t2, s, subUv); // Bottom-left
-          col = vec4f(d.rgb, 1.0);
+          let d = textureSample(t2, s, subUv);
+          col = vec4<f32>(d.rgb, 1.0);
         } else {
-          let d = textureSample(t3, s, subUv); // Bottom-right
-          col = vec4f(d.rgb, 1.0);
+          let d = textureSample(t3, s, subUv);
+          col = vec4<f32>(d.rgb, 1.0);
         }
 
         return col * border;
@@ -483,7 +531,7 @@ ${outputAssignments}
         targets: [{ format: this.canvasFormat }],
       },
       primitive: {
-        topology: 'triangle-list',
+        topology: 'triangle-strip',
       },
     });
   }
@@ -491,7 +539,6 @@ ${outputAssignments}
   private updateBindGroups(): void {
     if (!this.device || !this.mrtPipeline || !this.blitPipeline || !this.mrtUniformBuffer || !this.blitUniformBuffer || !this.sampler) return;
 
-    // 1. MRT Bind Group
     this.mrtBindGroup = this.device.createBindGroup({
       layout: this.mrtPipeline.getBindGroupLayout(0),
       entries: [
@@ -502,8 +549,6 @@ ${outputAssignments}
       ],
     });
 
-    // 2. Blit Bind Group
-    // Provide view from target if active, or dummy view if inactive
     const v0 = this.targetViews[0] || this.dummyViews[0]!;
     const v1 = this.targetViews[1] || this.dummyViews[1]!;
     const v2 = this.targetViews[2] || this.dummyViews[2]!;
@@ -528,7 +573,6 @@ ${outputAssignments}
     const aluComplexityIndex = config.aluComplexity === 'low' ? 0 : config.aluComplexity === 'medium' ? 1 : 2;
     const passes = Math.max(1, config.passes || 1);
 
-    // 1. Update Uniform Buffers
     const mrtUniformData = new ArrayBuffer(32);
     const mrtFloatView = new Float32Array(mrtUniformData);
     const mrtUintView = new Uint32Array(mrtUniformData);
@@ -554,10 +598,8 @@ ${outputAssignments}
     const blitUniformData = new Uint32Array([previewMode, 0, 0, 0]);
     this.device.queue.writeBuffer(this.blitUniformBuffer!, 0, blitUniformData);
 
-    // 2. Begin Command Encoding
     const commandEncoder = this.device.createCommandEncoder();
 
-    // Color attachments for MRT pass
     const colorAttachments: GPURenderPassColorAttachment[] = [];
     for (let i = 0; i < config.mrtCount; i++) {
       const view = this.targetViews[i];
@@ -571,7 +613,6 @@ ${outputAssignments}
       }
     }
 
-    // MRT Render Pass (with overdraw passes)
     const mrtPass = commandEncoder.beginRenderPass({
       colorAttachments,
     });
@@ -579,11 +620,10 @@ ${outputAssignments}
     mrtPass.setBindGroup(0, this.mrtBindGroup!);
 
     for (let p = 0; p < passes; p++) {
-      mrtPass.draw(3, 1, 0, 0);
+      mrtPass.draw(4, 1, 0, 0);
     }
     mrtPass.end();
 
-    // 3. Screen Blit Pass
     const canvasTextureView = this.context.getCurrentTexture().createView();
     const blitPass = commandEncoder.beginRenderPass({
       colorAttachments: [
@@ -598,7 +638,7 @@ ${outputAssignments}
 
     blitPass.setPipeline(this.blitPipeline);
     blitPass.setBindGroup(0, this.blitBindGroup!);
-    blitPass.draw(3, 1, 0, 0);
+    blitPass.draw(4, 1, 0, 0);
     blitPass.end();
 
     this.device.queue.submit([commandEncoder.finish()]);

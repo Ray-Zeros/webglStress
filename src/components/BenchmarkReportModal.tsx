@@ -61,10 +61,10 @@ export const BenchmarkReportModal: React.FC<BenchmarkReportModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-200">
-      <div className="relative w-full max-w-xl rounded-2xl border border-cyan-500/30 bg-slate-900/95 shadow-2xl text-slate-100 overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 animate-in fade-in duration-200">
+      <div className="relative w-full max-w-xl rounded-2xl border border-cyan-800 bg-[#090d16] shadow-2xl text-slate-100 overflow-hidden">
         {/* Header Banner */}
-        <div className="relative px-6 py-5 bg-gradient-to-r from-cyan-950/60 via-slate-900 to-indigo-950/60 border-b border-slate-800">
+        <div className="relative px-6 py-5 bg-[#0b1329] border-b border-slate-800">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="p-2.5 rounded-xl bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 shadow-inner">

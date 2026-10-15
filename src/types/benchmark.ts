@@ -1,4 +1,4 @@
-export type GraphicsAPI = 'webgl2' | 'webgpu';
+export type GraphicsAPI = 'webgl2' | 'webgpu' | 'webgl1';
 
 export type TextureFormatOption = 'RGBA8' | 'RGBA16F';
 
