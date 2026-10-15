@@ -117,15 +117,38 @@ export const FrameTimeSparkline: React.FC<FrameTimeSparklineProps> = ({
   }, [frameTimes, avgMs, p99Ms, width, height]);
 
   return (
-    <div className="relative inline-block overflow-hidden rounded border border-slate-700/60 bg-slate-900/80">
+    <div
+      className="relative inline-block overflow-hidden rounded border border-slate-700/60 bg-slate-900/80"
+      style={{
+        position: 'relative',
+        display: 'inline-block',
+        backgroundColor: '#0f172a',
+        borderColor: '#1e293b',
+        borderRadius: '8px',
+        width: `${width}px`,
+        height: `${height}px`,
+      }}
+    >
       <canvas
         ref={canvasRef}
-        style={{ width: `${width}px`, height: `${height}px` }}
+        style={{ width: `${width}px`, height: `${height}px`, display: 'block' }}
         className="block"
       />
-      <div className="pointer-events-none absolute bottom-1 right-2 flex items-center gap-2 font-mono text-[10px] text-slate-400">
+      <div
+        className="pointer-events-none absolute bottom-1 right-2 flex items-center gap-2 font-mono text-[10px] text-slate-400"
+        style={{
+          position: 'absolute',
+          bottom: '4px',
+          right: '8px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          color: '#94a3b8',
+          fontSize: '10px',
+        }}
+      >
         <span>avg: {avgMs.toFixed(1)}ms</span>
-        <span className={p99Ms > 33.3 ? 'text-amber-400 font-semibold' : 'text-slate-300'}>
+        <span style={{ color: p99Ms > 33.3 ? '#fbbf24' : '#cbd5e1', fontWeight: p99Ms > 33.3 ? 'bold' : 'normal' }}>
           p99: {p99Ms.toFixed(1)}ms
         </span>
       </div>

@@ -362,36 +362,67 @@ export default function App() {
   return (
     <div
       ref={containerRef}
-      className="relative w-screen h-screen overflow-hidden bg-slate-950 font-sans select-none"
+      className="app-container relative w-screen h-screen overflow-hidden bg-slate-950 font-sans select-none"
+      style={{
+        position: 'relative',
+        width: '100vw',
+        height: '100vh',
+        overflow: 'hidden',
+        backgroundColor: '#020617',
+      }}
     >
       {/* Background Main Canvas */}
       <canvas
         ref={canvasRef}
-        className="w-full h-full object-cover block bg-slate-950"
+        className="app-canvas w-full h-full object-cover block bg-slate-950"
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          zIndex: 1,
+          display: 'block',
+        }}
       />
 
       {/* HUD Telemetry, Controls & Modals */}
-      <HudOverlay
-        config={config}
-        metrics={metrics}
-        deviceInfo={deviceInfo}
-        activeWidth={activeRes.width}
-        activeHeight={activeRes.height}
-        webgpuSupported={webgpuSupported}
-        webgpuFallbackWarning={webgpuFallbackWarning}
-        isBenchmarking={isBenchmarking}
-        benchmarkProgress={benchmarkProgress}
-        benchmarkCountdown={benchmarkCountdown}
-        isFullscreen={isFullscreen}
-        isContextLost={isContextLost}
-        onConfigChange={setConfig}
-        onResetMetrics={handleResetMetrics}
-        onStartBenchmark={handleStartBenchmark}
-        onStopBenchmark={handleStopBenchmark}
-        onOpenGpuInfo={() => setShowGpuInfoModal(true)}
-        onToggleFullscreen={handleToggleFullscreen}
-        onDismissWarning={() => setWebgpuFallbackWarning(null)}
-      />
+      <div
+        className="hud-overlay-root"
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          zIndex: 100,
+          pointerEvents: 'none',
+          transform: 'translate3d(0, 0, 0)',
+          WebkitTransform: 'translate3d(0, 0, 0)',
+        }}
+      >
+        <HudOverlay
+          config={config}
+          metrics={metrics}
+          deviceInfo={deviceInfo}
+          activeWidth={activeRes.width}
+          activeHeight={activeRes.height}
+          webgpuSupported={webgpuSupported}
+          webgpuFallbackWarning={webgpuFallbackWarning}
+          isBenchmarking={isBenchmarking}
+          benchmarkProgress={benchmarkProgress}
+          benchmarkCountdown={benchmarkCountdown}
+          isFullscreen={isFullscreen}
+          isContextLost={isContextLost}
+          onConfigChange={setConfig}
+          onResetMetrics={handleResetMetrics}
+          onStartBenchmark={handleStartBenchmark}
+          onStopBenchmark={handleStopBenchmark}
+          onOpenGpuInfo={() => setShowGpuInfoModal(true)}
+          onToggleFullscreen={handleToggleFullscreen}
+          onDismissWarning={() => setWebgpuFallbackWarning(null)}
+        />
+      </div>
 
       {/* GPU Hardware Diagnostics Modal */}
       <GpuInfoModal

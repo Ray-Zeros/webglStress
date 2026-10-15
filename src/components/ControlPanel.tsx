@@ -112,17 +112,21 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   const maxAllowedTargets = Math.max(1, deviceInfo.maxDrawBuffers || 4);
 
   return (
-    <div className="flex flex-col gap-3.5 rounded-2xl border border-slate-800 bg-[#090d16] p-3.5 sm:p-4 shadow-2xl text-slate-100 max-w-sm sm:max-w-md w-full touch-scroll overflow-y-auto max-h-[75vh] sm:max-h-[82vh]">
+    <div
+      className="flex flex-col gap-3.5 rounded-2xl border border-slate-800 bg-[#090d16] p-3.5 sm:p-4 shadow-2xl text-slate-100 max-w-sm sm:max-w-md w-full touch-scroll overflow-y-auto max-h-[75vh] sm:max-h-[82vh]"
+      style={{ backgroundColor: '#090d16', borderColor: '#1e293b', color: '#f8fafc' }}
+    >
       {/* Fallback Warning Toast / Banner */}
       {webgpuFallbackWarning && (
-        <div className="rounded-xl border border-amber-800 bg-[#2b1f0c] p-3 flex items-start gap-2.5">
-          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+        <div className="rounded-xl border border-amber-800 bg-[#2b1f0c] p-3 flex items-start gap-2.5" style={{ backgroundColor: '#2b1f0c', borderColor: '#78350f' }}>
+          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" size={16} style={{ color: '#fbbf24' }} />
           <div className="space-y-1 text-xs">
-            <div className="font-semibold text-amber-200">Hardware / API Notice</div>
-            <div className="text-amber-300/90 leading-relaxed text-[11px]">{webgpuFallbackWarning}</div>
+            <div className="font-semibold text-amber-200" style={{ color: '#fde68a' }}>Hardware / API Notice</div>
+            <div className="text-amber-300/90 leading-relaxed text-[11px]" style={{ color: '#fcd34d' }}>{webgpuFallbackWarning}</div>
             <button
               onClick={onDismissWarning}
               className="text-[11px] font-bold text-amber-400 hover:text-amber-200 underline mt-0.5"
+              style={{ color: '#fbbf24' }}
             >
               Dismiss
             </button>
@@ -134,10 +138,10 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
       <div className="space-y-2">
         <div className="flex items-center justify-between text-xs font-semibold text-slate-300">
           <span className="flex items-center gap-1.5 uppercase tracking-wider">
-            <Cpu className="w-3.5 h-3.5 text-cyan-400" />
+            <Cpu className="w-3.5 h-3.5 text-cyan-400" size={14} style={{ color: '#22d3ee' }} />
             <span>Graphics Engine API</span>
           </span>
-          <span className="text-[11px] font-mono text-cyan-400 uppercase font-bold">
+          <span className="text-[11px] font-mono text-cyan-400 uppercase font-bold" style={{ color: '#22d3ee' }}>
             {config.api}
           </span>
         </div>
@@ -188,13 +192,13 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
       </div>
 
       {/* 2. MRT Target Count Selector */}
-      <div className="space-y-2 border-t border-slate-800 pt-3">
+      <div className="space-y-2 border-t border-slate-800 pt-3" style={{ borderColor: '#1e293b' }}>
         <div className="flex items-center justify-between text-xs font-semibold text-slate-300">
           <span className="flex items-center gap-1.5 uppercase tracking-wider">
-            <Layers className="w-3.5 h-3.5 text-cyan-400" />
+            <Layers className="w-3.5 h-3.5 text-cyan-400" size={14} style={{ color: '#22d3ee' }} />
             <span>Active Render Targets (MRT)</span>
           </span>
-          <span className="font-mono text-cyan-400 font-bold">
+          <span className="font-mono text-cyan-400 font-bold" style={{ color: '#22d3ee' }}>
             {config.mrtCount} Targets (Max: {maxAllowedTargets})
           </span>
         </div>
@@ -211,10 +215,15 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                     ? 'bg-cyan-950 border-cyan-500 text-cyan-300 shadow'
                     : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
                 }`}
+                style={{
+                  backgroundColor: config.mrtCount === count ? '#082f49' : '#0f172a',
+                  borderColor: config.mrtCount === count ? '#0284c7' : '#1e293b',
+                  color: config.mrtCount === count ? '#7dd3fc' : '#94a3b8',
+                }}
                 title={isExceedingHardware ? `Hardware limit is ${maxAllowedTargets} MRT; will render up to limit` : undefined}
               >
                 {count} MRT
-                {isExceedingHardware && <span className="block text-[8px] text-amber-400">*Clamped</span>}
+                {isExceedingHardware && <span className="block text-[8px] text-amber-400" style={{ color: '#fbbf24' }}>*Clamped</span>}
               </button>
             );
           })}
@@ -222,14 +231,14 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
       </div>
 
       {/* 3. Per-Target Dynamic Format Selectors */}
-      <div className="space-y-2 border-t border-slate-800 pt-3">
+      <div className="space-y-2 border-t border-slate-800 pt-3" style={{ borderColor: '#1e293b' }}>
         <div className="flex items-center justify-between text-xs font-semibold text-slate-300">
           <span className="flex items-center gap-1.5 uppercase tracking-wider">
-            <Sliders className="w-3.5 h-3.5 text-cyan-400" />
+            <Sliders className="w-3.5 h-3.5 text-cyan-400" size={14} style={{ color: '#22d3ee' }} />
             <span>Target Formats & Channels</span>
           </span>
           {!isFloatSupported && (
-            <span className="text-[10px] text-amber-400 font-mono">
+            <span className="text-[10px] text-amber-400 font-mono" style={{ color: '#fbbf24' }}>
               RGBA16F unavailable
             </span>
           )}
@@ -297,10 +306,10 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
       <div className="space-y-2 border-t border-slate-800 pt-3">
         <div className="flex items-center justify-between text-xs font-semibold text-slate-300">
           <span className="flex items-center gap-1.5 uppercase tracking-wider">
-            <Monitor className="w-3.5 h-3.5 text-cyan-400" />
+            <Monitor className="w-3.5 h-3.5 text-cyan-400" size={14} style={{ color: '#22d3ee' }} />
             <span>Render Resolution</span>
           </span>
-          <span className="font-mono text-cyan-300 font-bold">
+          <span className="font-mono text-cyan-300 font-bold" style={{ color: '#67e8f9' }}>
             {activeWidth} × {activeHeight}
           </span>
         </div>
@@ -404,7 +413,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
         <div className="space-y-1.5">
           <div className="flex items-center justify-between text-xs font-semibold text-slate-300">
             <span className="flex items-center gap-1.5 uppercase tracking-wider">
-              <Flame className="w-3.5 h-3.5 text-amber-400" />
+              <Flame className="w-3.5 h-3.5 text-amber-400" size={14} style={{ color: '#fbbf24' }} />
               <span>Shader ALU Complexity</span>
             </span>
             <span className="text-[11px] font-mono text-slate-400 uppercase">
@@ -426,6 +435,11 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                     ? 'bg-amber-950 border-amber-500 text-amber-300 font-bold'
                     : 'bg-slate-900 border-slate-800 text-slate-400'
                 }`}
+                style={{
+                  backgroundColor: config.aluComplexity === lvl ? '#451a03' : '#0f172a',
+                  borderColor: config.aluComplexity === lvl ? '#d97706' : '#1e293b',
+                  color: config.aluComplexity === lvl ? '#fcd34d' : '#94a3b8',
+                }}
               >
                 {lvl}
               </button>
@@ -437,7 +451,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
         <div className="space-y-1.5">
           <div className="flex items-center justify-between text-xs font-semibold text-slate-300">
             <span className="uppercase tracking-wider">Overdraw Stress Multiplier</span>
-            <span className="font-mono text-cyan-400 font-bold">{config.passes}x Passes</span>
+            <span className="font-mono text-cyan-400 font-bold" style={{ color: '#22d3ee' }}>{config.passes}x Passes</span>
           </div>
 
           <div className="grid grid-cols-5 gap-1 text-xs font-mono">
@@ -450,6 +464,11 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                     ? 'bg-cyan-950 border-cyan-500 text-cyan-300 font-bold'
                     : 'bg-slate-900 border-slate-800 text-slate-400'
                 }`}
+                style={{
+                  backgroundColor: config.passes === pass ? '#082f49' : '#0f172a',
+                  borderColor: config.passes === pass ? '#0284c7' : '#1e293b',
+                  color: config.passes === pass ? '#7dd3fc' : '#94a3b8',
+                }}
               >
                 {pass}x
               </button>
@@ -459,10 +478,10 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
       </div>
 
       {/* 6. Visual Target Preview Mode */}
-      <div className="space-y-2 border-t border-slate-800 pt-3">
+      <div className="space-y-2 border-t border-slate-800 pt-3" style={{ borderColor: '#1e293b' }}>
         <div className="flex items-center justify-between text-xs font-semibold text-slate-300">
           <span className="flex items-center gap-1.5 uppercase tracking-wider">
-            <Eye className="w-3.5 h-3.5 text-cyan-400" />
+            <Eye className="w-3.5 h-3.5 text-cyan-400" size={14} style={{ color: '#22d3ee' }} />
             <span>Target Preview / Blit Mode</span>
           </span>
           <span className="text-[10px] text-slate-400">Screen Output</span>
@@ -526,14 +545,14 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                 : 'bg-slate-900 border-slate-800 text-slate-400'
             }`}
           >
-            <Grid2X2 className="w-3.5 h-3.5" />
+            <Grid2X2 className="w-3.5 h-3.5" size={14} />
             <span>4-Way Split View</span>
           </button>
         </div>
       </div>
 
       {/* 7. Bottom Action Controls */}
-      <div className="border-t border-slate-800 pt-3 flex items-center justify-between gap-2">
+      <div className="border-t border-slate-800 pt-3 flex items-center justify-between gap-2" style={{ borderColor: '#1e293b' }}>
         <button
           onClick={togglePause}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition ${
@@ -541,17 +560,23 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
               ? 'bg-amber-600 border-amber-500 text-white'
               : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800'
           }`}
+          style={{
+            backgroundColor: config.isPaused ? '#d97706' : '#0f172a',
+            borderColor: config.isPaused ? '#f59e0b' : '#1e293b',
+            color: '#f8fafc',
+          }}
         >
-          {config.isPaused ? <Play className="w-3.5 h-3.5 fill-current" /> : <Pause className="w-3.5 h-3.5" />}
+          {config.isPaused ? <Play className="w-3.5 h-3.5 fill-current" size={14} /> : <Pause className="w-3.5 h-3.5" size={14} />}
           <span>{config.isPaused ? 'Resume' : 'Pause Loop'}</span>
         </button>
 
         <button
           onClick={onToggleFullscreen}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-800 bg-slate-900 text-slate-300 hover:bg-slate-800 text-xs font-semibold transition"
+          style={{ backgroundColor: '#0f172a', borderColor: '#1e293b', color: '#f8fafc' }}
           title="Toggle Fullscreen Canvas"
         >
-          {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+          {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" size={14} /> : <Maximize2 className="w-3.5 h-3.5" size={14} />}
           <span>{isFullscreen ? 'Exit Full' : 'Fullscreen'}</span>
         </button>
       </div>

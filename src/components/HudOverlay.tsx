@@ -91,44 +91,52 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
       )}
 
       {/* Top Header & Quick Status Bar */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pointer-events-auto">
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pointer-events-auto" style={{ pointerEvents: 'auto' }}>
         {/* Title & Badges */}
-        <div className="flex items-center justify-between sm:justify-start gap-2.5 rounded-2xl border border-slate-800 bg-[#090d16] px-3 sm:px-4 py-2 shadow-xl text-slate-100">
+        <div
+          className="flex items-center justify-between sm:justify-start gap-2.5 rounded-2xl border border-slate-800 bg-[#090d16] px-3 sm:px-4 py-2 shadow-xl text-slate-100"
+          style={{ backgroundColor: '#090d16', borderColor: '#1e293b', color: '#f8fafc' }}
+        >
           <div className="flex items-center gap-2">
-            <div className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse shadow-sm shadow-cyan-400" />
-            <span className="font-black tracking-wide text-xs sm:text-sm uppercase bg-gradient-to-r from-cyan-400 via-sky-300 to-indigo-300 bg-clip-text text-transparent">
+            <div className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse shadow-sm shadow-cyan-400" style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#22d3ee' }} />
+            <span className="font-black tracking-wide text-xs sm:text-sm uppercase text-cyan-300" style={{ color: '#67e8f9', fontWeight: 'bold' }}>
               GPU Bandwidth Bench
             </span>
           </div>
 
-          <div className="h-4 w-px bg-slate-800 hidden sm:block" />
+          <div className="h-4 w-px bg-slate-800 hidden sm:block" style={{ height: '16px', width: '1px', backgroundColor: '#334155' }} />
 
           {/* Pill status */}
           <div className="flex items-center gap-1 text-[10px] font-mono">
             <span
-              className={`px-2 py-0.5 rounded-full font-bold uppercase border ${
-                config.api === 'webgpu'
-                  ? 'bg-indigo-950 text-indigo-300 border-indigo-700'
-                  : config.api === 'webgl2'
-                  ? 'bg-cyan-950 text-cyan-300 border-cyan-700'
-                  : 'bg-purple-950 text-purple-300 border-purple-700'
-              }`}
+              className="px-2 py-0.5 rounded-full font-bold uppercase border"
+              style={{
+                backgroundColor: config.api === 'webgpu' ? '#1e1b4b' : config.api === 'webgl2' ? '#082f49' : '#2e1065',
+                color: config.api === 'webgpu' ? '#a5b4fc' : config.api === 'webgl2' ? '#7dd3fc' : '#d8b4fe',
+                borderColor: config.api === 'webgpu' ? '#4338ca' : config.api === 'webgl2' ? '#0369a1' : '#7e22ce',
+                padding: '2px 8px',
+                borderRadius: '9999px',
+                fontSize: '10px',
+              }}
             >
               {config.api}
             </span>
-            <span className="px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-300 hidden md:inline">
+            <span className="px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-300 hidden md:inline" style={{ backgroundColor: '#1e293b', color: '#cbd5e1', padding: '2px 6px', borderRadius: '9999px', fontSize: '10px' }}>
               {config.mrtCount} MRT ({metrics.totalBytesPerPixel}B/px)
             </span>
-            <span className="px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-300">
+            <span className="px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-300" style={{ backgroundColor: '#1e293b', color: '#cbd5e1', padding: '2px 6px', borderRadius: '9999px', fontSize: '10px' }}>
               {activeWidth}×{activeHeight}
             </span>
           </div>
         </div>
 
         {/* HUD Controls & Mobile Tabs */}
-        <div className="flex items-center justify-between sm:justify-end gap-1.5 rounded-2xl border border-slate-800 bg-[#090d16] p-1.5 shadow-xl text-slate-300">
-          {/* Mobile Tab Switcher (Visible only on mobile screens < 768px) */}
-          <div className="flex sm:hidden items-center rounded-xl bg-black border border-slate-800 p-0.5">
+        <div
+          className="flex items-center justify-between sm:justify-end gap-1.5 rounded-2xl border border-slate-800 bg-[#090d16] p-1.5 shadow-xl text-slate-300"
+          style={{ backgroundColor: '#090d16', borderColor: '#1e293b', color: '#cbd5e1' }}
+        >
+          {/* Mobile Tab Switcher */}
+          <div className="flex sm:hidden items-center rounded-xl bg-black border border-slate-800 p-0.5" style={{ backgroundColor: '#000000', borderColor: '#1e293b' }}>
             <button
               onClick={() => setMobileTab('metrics')}
               className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition ${
@@ -136,8 +144,9 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
                   ? 'bg-cyan-600 text-white shadow'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
+              style={{ backgroundColor: mobileTab === 'metrics' ? '#0891b2' : 'transparent', color: mobileTab === 'metrics' ? '#ffffff' : '#94a3b8' }}
             >
-              <Activity className="w-3.5 h-3.5" />
+              <Activity className="w-3.5 h-3.5" size={14} />
               <span>Stats</span>
             </button>
             <button
@@ -147,8 +156,9 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
                   ? 'bg-cyan-600 text-white shadow'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
+              style={{ backgroundColor: mobileTab === 'controls' ? '#0891b2' : 'transparent', color: mobileTab === 'controls' ? '#ffffff' : '#94a3b8' }}
             >
-              <Sliders className="w-3.5 h-3.5" />
+              <Sliders className="w-3.5 h-3.5" size={14} />
               <span>Config</span>
             </button>
           </div>
@@ -161,9 +171,10 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
                 ? 'bg-slate-800 text-white'
                 : 'bg-cyan-600 text-white shadow-lg'
             }`}
+            style={{ backgroundColor: hudVisible ? '#1e293b' : '#0891b2', color: '#ffffff' }}
             title="Toggle All HUD Panels (Clean View)"
           >
-            {hudVisible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+            {hudVisible ? <EyeOff className="w-3.5 h-3.5" size={14} /> : <Eye className="w-3.5 h-3.5" size={14} />}
             <span className="hidden sm:inline">{hudVisible ? 'Hide HUD' : 'Show HUD'}</span>
           </button>
 
@@ -177,9 +188,10 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
                     ? 'bg-cyan-950 text-cyan-300 border border-cyan-800'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
+                style={{ backgroundColor: showMetricsDesktop ? '#082f49' : 'transparent', color: showMetricsDesktop ? '#7dd3fc' : '#94a3b8' }}
                 title="Toggle Telemetry Gauges"
               >
-                <Activity className="w-4 h-4" />
+                <Activity className="w-4 h-4" size={16} />
               </button>
 
               <button
@@ -189,9 +201,10 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
                     ? 'bg-cyan-950 text-cyan-300 border border-cyan-800'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
+                style={{ backgroundColor: showControlsDesktop ? '#082f49' : 'transparent', color: showControlsDesktop ? '#7dd3fc' : '#94a3b8' }}
                 title="Toggle Configuration Controls"
               >
-                <Sliders className="w-4 h-4" />
+                <Sliders className="w-4 h-4" size={16} />
               </button>
             </div>
           )}
@@ -199,17 +212,19 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
           <button
             onClick={onOpenGpuInfo}
             className="p-1.5 sm:p-2 rounded-xl text-xs text-slate-400 hover:text-cyan-300 hover:bg-slate-800 transition"
+            style={{ color: '#94a3b8' }}
             title="Hardware Device Info"
           >
-            <Info className="w-4 h-4" />
+            <Info className="w-4 h-4" size={16} />
           </button>
 
           <button
             onClick={onToggleFullscreen}
             className="p-1.5 sm:p-2 rounded-xl text-xs text-slate-400 hover:text-white hover:bg-slate-800 transition"
+            style={{ color: '#94a3b8' }}
             title="Fullscreen Toggle"
           >
-            {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+            {isFullscreen ? <Minimize2 className="w-4 h-4" size={16} /> : <Maximize2 className="w-4 h-4" size={16} />}
           </button>
         </div>
       </div>
@@ -308,18 +323,21 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
       )}
 
       {/* Bottom Sub-status Bar */}
-      <div className="pointer-events-auto flex items-center justify-between text-[10px] sm:text-[11px] font-mono text-slate-400 bg-[#090d16] border border-slate-800 rounded-xl px-3 py-1.5 max-w-xl mx-auto w-full">
+      <div
+        className="pointer-events-auto flex items-center justify-between text-[10px] sm:text-[11px] font-mono text-slate-400 bg-[#090d16] border border-slate-800 rounded-xl px-3 py-1.5 max-w-xl mx-auto w-full"
+        style={{ backgroundColor: '#090d16', borderColor: '#1e293b', color: '#94a3b8', pointerEvents: 'auto' }}
+      >
         <div className="flex items-center gap-1.5 sm:gap-2">
-          <span className="w-2 h-2 rounded-full bg-emerald-400" />
+          <span className="w-2 h-2 rounded-full bg-emerald-400" style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#34d399' }} />
           <span>Rendering</span>
         </div>
         <div className="flex items-center gap-2 sm:gap-3">
-          <span>ALU: <strong className="text-slate-200 uppercase">{config.aluComplexity}</strong></span>
-          <span>Passes: <strong className="text-slate-200">{config.passes}x</strong></span>
-          <span className="hidden sm:inline">Preview: <strong className="text-slate-200 uppercase">{config.previewTarget}</strong></span>
+          <span>ALU: <strong className="text-slate-200 uppercase" style={{ color: '#e2e8f0' }}>{config.aluComplexity}</strong></span>
+          <span>Passes: <strong className="text-slate-200" style={{ color: '#e2e8f0' }}>{config.passes}x</strong></span>
+          <span className="hidden sm:inline">Preview: <strong className="text-slate-200 uppercase" style={{ color: '#e2e8f0' }}>{config.previewTarget}</strong></span>
         </div>
         <div>
-          <span><strong className="text-emerald-400 font-bold">{metrics.theoreticalBandwidthGBps.toFixed(2)} GB/s</strong></span>
+          <span><strong className="text-emerald-400 font-bold" style={{ color: '#34d399' }}>{metrics.theoreticalBandwidthGBps.toFixed(2)} GB/s</strong></span>
         </div>
       </div>
     </div>
