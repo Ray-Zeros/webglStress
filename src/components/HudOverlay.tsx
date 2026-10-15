@@ -391,26 +391,62 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
         }}
       >
         <button
-          onClick={() => setActiveView(activeView === 'controls' ? 'metrics' : 'controls')}
-          className="flex items-center gap-1.5 hover:text-white transition"
-          title="Click to toggle between Controls and Metrics"
+          onClick={() => {
+            if (activeView === 'clean') setActiveView('controls');
+            else if (activeView === 'controls') setActiveView('metrics');
+            else if (activeView === 'metrics') setActiveView('clean');
+            else setActiveView('clean');
+          }}
+          className="flex items-center gap-1.5 hover:text-white transition cursor-pointer"
+          title="切换面板显示模式 (Toggle GUI panels or clean mode)"
         >
           <span
             className="w-2 h-2 rounded-full bg-emerald-400"
             style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#34d399' }}
           />
           <span className="underline decoration-dotted font-bold text-slate-300" style={{ color: '#cbd5e1' }}>
-            {activeView === 'controls' ? '切换监控 ➔' : '切换设置 ➔'}
+            {activeView === 'clean' ? '打开面板 ➔' : activeView === 'controls' ? '切换监控 ➔' : '关闭面板 ➔'}
           </span>
         </button>
 
-        <div className="flex items-center gap-2">
-          <span>ALU: <strong className="text-slate-200 uppercase" style={{ color: '#e2e8f0' }}>{config.aluComplexity}</strong></span>
+        <div className="hidden xs:flex items-center gap-1.5 text-slate-400">
+          <span>ALU:<strong className="text-slate-200 uppercase ml-0.5" style={{ color: '#e2e8f0' }}>{config.aluComplexity}</strong></span>
+          <span className="text-slate-600">|</span>
           <span>{config.passes}x</span>
         </div>
 
-        <div>
-          <span><strong className="text-emerald-400 font-bold" style={{ color: '#34d399' }}>{metrics.theoreticalBandwidthGBps.toFixed(2)} GB/s</strong></span>
+        {/* Avg FPS next to GB/s (Always visible even when GUI panels are closed) */}
+        <div className="flex items-center gap-1.5 sm:gap-2">
+          <div
+            className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800"
+            style={{ backgroundColor: '#0f172a', borderColor: '#1e293b' }}
+            title="滑动平均帧率 (Average FPS - Low frontend overhead)"
+          >
+            <span className="text-slate-400 text-[9px] sm:text-[10px]">Avg:</span>
+            <strong
+              className={`font-mono font-bold text-[10px] sm:text-[11px] ${
+                metrics.windowAvgFps >= 55
+                  ? 'text-emerald-400'
+                  : metrics.windowAvgFps >= 30
+                  ? 'text-amber-400'
+                  : 'text-rose-400'
+              }`}
+            >
+              {metrics.windowAvgFps.toFixed(1)}
+            </strong>
+            <span className="text-slate-400 text-[9px]">fps</span>
+          </div>
+
+          <div
+            className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800"
+            style={{ backgroundColor: '#0f172a', borderColor: '#1e293b' }}
+            title="理论显存带宽 (Theoretical Memory Bandwidth)"
+          >
+            <strong className="text-cyan-400 font-mono font-bold text-[10px] sm:text-[11px]" style={{ color: '#22d3ee' }}>
+              {metrics.theoreticalBandwidthGBps.toFixed(2)}
+            </strong>
+            <span className="text-slate-400 text-[9px]">GB/s</span>
+          </div>
         </div>
       </div>
     </div>

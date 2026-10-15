@@ -139,7 +139,8 @@ export class WebGPUEngine {
       });
 
       device.addEventListener('uncapturederror', (event: any) => {
-        console.error('WebGPU uncaptured error:', event.error);
+        const msg = event.error?.message || event.error?.toString() || 'GPUValidationError';
+        console.error('WebGPU uncaptured error:', msg, event.error);
       });
 
       let context: GPUCanvasContext | null = null;
@@ -277,7 +278,37 @@ export class WebGPUEngine {
     this.currentWidth = clampedW;
     this.currentHeight = clampedH;
 
+    // Reconfigure context for new canvas dimensions
+    try {
+      this.context?.configure({
+        device: this.device,
+        format: this.canvasFormat,
+        alphaMode: 'opaque',
+      });
+    } catch {
+      try {
+        this.context?.configure({
+          device: this.device,
+          format: this.canvasFormat,
+          alphaMode: 'premultiplied',
+        });
+      } catch (e) {
+        console.warn('WebGPU reconfigure warning:', e);
+      }
+    }
+
     this.destroyTargetTextures();
+
+    // 1. Always create all 4 dummy views so bind groups never have missing entries
+    for (let i = 0; i < 4; i++) {
+      const dummy = this.device.createTexture({
+        size: [1, 1, 1],
+        format: 'rgba8unorm',
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT,
+      });
+      this.dummyTextures[i] = dummy;
+      this.dummyViews[i] = dummy.createView();
+    }
 
     const maxAttachments = this.device.limits?.maxColorAttachments || 8;
     const effectiveMrtCount = Math.min(config.mrtCount, maxAttachments);
@@ -298,16 +329,6 @@ export class WebGPUEngine {
       this.targetViews[i] = texture.createView();
     }
 
-    for (let i = effectiveMrtCount; i < 4; i++) {
-      const dummy = this.device.createTexture({
-        size: [1, 1, 1],
-        format: 'rgba8unorm',
-        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT,
-      });
-      this.dummyTextures[i] = dummy;
-      this.dummyViews[i] = dummy.createView();
-    }
-
     this.buildMrtPipeline(effectiveMrtCount, targetFormats);
     this.buildBlitPipeline();
     this.updateBindGroups();
@@ -326,7 +347,7 @@ export class WebGPUEngine {
       outputAssignments += `  out.target${i} = target${i};\n`;
     }
 
-    // Standard cross-compatible WGSL (using vec2<f32>, vec3<f32>, vec4<f32> for universal browser support)
+    // Standard cross-compatible WGSL with strictly scalar unpacked vector constructors
     const wgslShader = `
     struct Uniforms {
       time: f32,
@@ -348,16 +369,12 @@ export class WebGPUEngine {
 
     @vertex
     fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
-      var pos = array<vec2<f32>, 4>(
-        vec2<f32>(-1.0, -1.0),
-        vec2<f32>( 1.0, -1.0),
-        vec2<f32>(-1.0,  1.0),
-        vec2<f32>( 1.0,  1.0)
-      );
       var out: VertexOutput;
-      let p = pos[vertexIndex];
-      out.position = vec4<f32>(p, 0.0, 1.0);
-      out.uv = p * 0.5 + vec2<f32>(0.5, 0.5);
+      // Procedural quad covering [-1, 1] NDC
+      let x = f32(i32(vertexIndex & 1u) * 2 - 1);
+      let y = f32(i32(vertexIndex >> 1u) * 2 - 1);
+      out.position = vec4<f32>(x, y, 0.0, 1.0);
+      out.uv = vec2<f32>(x * 0.5 + 0.5, y * 0.5 + 0.5);
       return out;
     }
 
@@ -411,31 +428,31 @@ ${outputStructMembers}
         aluAccum += sin(aspectUv.x * 24.0 + aluAccum * 3.0) * cos(aspectUv.y * 24.0 - aluAccum * 3.0);
       }
 
-      // Target 0: Albedo
+      // Target 0: Albedo (safe scalar unpack)
       let colA = vec3<f32>(0.08, 0.45, 0.95);
       let colB = vec3<f32>(0.98, 0.32, 0.15);
       let colC = vec3<f32>(0.12, 0.85, 0.55);
       let pattern = 0.5 + 0.5 * sin(p.x * 3.0 + aluAccum * 1.5 + t);
       let albedo = mix(colA, mix(colB, colC, sin(t * 0.5) * 0.5 + 0.5), pattern);
-      let target0 = vec4<f32>(albedo, 1.0);
+      let target0 = vec4<f32>(albedo.x, albedo.y, albedo.z, 1.0);
 
-      // Target 1: World Normal + Roughness
+      // Target 1: World Normal + Roughness (safe scalar unpack)
       let nGrad = vec2<f32>(
         sin(p.x * 5.0 + t + aluAccum),
         cos(p.y * 5.0 - t + aluAccum)
       ) * 0.6;
-      let normal = normalize(vec3<f32>(nGrad, 1.0));
+      let normal = normalize(vec3<f32>(nGrad.x, nGrad.y, 1.0));
       let normalEncoded = normal * 0.5 + vec3<f32>(0.5, 0.5, 0.5);
       let roughness = clamp(0.1 + 0.8 * abs(sin(aluAccum * 2.0 + t * 0.5)), 0.05, 0.95);
-      let target1 = vec4<f32>(normalEncoded, roughness);
+      let target1 = vec4<f32>(normalEncoded.x, normalEncoded.y, normalEncoded.z, roughness);
 
       // Target 2: Metallic, AO, Specular, Curvature
       let metallic = clamp(sin(p.y * 4.0 - t * 0.7) * 0.5 + 0.5, 0.0, 1.0);
       let ao = clamp(1.0 - length(aspectUv) * 0.4 + aluAccum * 0.15, 0.2, 1.0);
       let target2 = vec4<f32>(metallic, ao, 0.5, abs(normal.x * normal.y));
 
-      // Target 3: Emissive / Velocity Vector
-      let fw = max(fwidth(aspectUv * 6.0), vec2<f32>(0.001, 0.001));
+      // Target 3: Emissive / Velocity Vector (safe gradient without compiler quirks)
+      let fw = max(abs(dpdx(aspectUv * 6.0)) + abs(dpdy(aspectUv * 6.0)), vec2<f32>(0.002, 0.002));
       let grid = abs(fract(aspectUv * 6.0 - vec2<f32>(t * 0.2, t * 0.1)) - 0.5) / fw;
       let line = min(grid.x, grid.y);
       let emissiveMask = 1.0 - min(line, 1.0);
@@ -449,27 +466,38 @@ ${outputAssignments}
     }
     `;
 
-    const shaderModule = this.device.createShaderModule({ code: wgslShader });
+    try {
+      const shaderModule = this.device.createShaderModule({ code: wgslShader });
+      shaderModule.getCompilationInfo?.().then((info) => {
+        for (const msg of info.messages) {
+          if (msg.type === 'error') {
+            console.error(`WebGPU MRT Shader Error [${msg.lineNum}:${msg.linePos}]: ${msg.message}`);
+          }
+        }
+      });
 
-    const colorTargets: GPUColorTargetState[] = formats.map((format) => ({
-      format,
-    }));
+      const colorTargets: GPUColorTargetState[] = formats.map((format) => ({
+        format,
+      }));
 
-    this.mrtPipeline = this.device.createRenderPipeline({
-      layout: 'auto',
-      vertex: {
-        module: shaderModule,
-        entryPoint: 'vs_main',
-      },
-      fragment: {
-        module: shaderModule,
-        entryPoint: 'fs_main',
-        targets: colorTargets,
-      },
-      primitive: {
-        topology: 'triangle-strip',
-      },
-    });
+      this.mrtPipeline = this.device.createRenderPipeline({
+        layout: 'auto',
+        vertex: {
+          module: shaderModule,
+          entryPoint: 'vs_main',
+        },
+        fragment: {
+          module: shaderModule,
+          entryPoint: 'fs_main',
+          targets: colorTargets,
+        },
+        primitive: {
+          topology: 'triangle-strip',
+        },
+      });
+    } catch (err) {
+      console.error('Failed to create WebGPU MRT RenderPipeline:', err);
+    }
   }
 
   private buildBlitPipeline(): void {
@@ -497,16 +525,11 @@ ${outputAssignments}
 
     @vertex
     fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
-      var pos = array<vec2<f32>, 4>(
-        vec2<f32>(-1.0, -1.0),
-        vec2<f32>( 1.0, -1.0),
-        vec2<f32>(-1.0,  1.0),
-        vec2<f32>( 1.0,  1.0)
-      );
       var out: VertexOutput;
-      let p = pos[vertexIndex];
-      out.position = vec4<f32>(p, 0.0, 1.0);
-      out.uv = p * 0.5 + vec2<f32>(0.5, 0.5);
+      let x = f32(i32(vertexIndex & 1u) * 2 - 1);
+      let y = f32(i32(vertexIndex >> 1u) * 2 - 1);
+      out.position = vec4<f32>(x, y, 0.0, 1.0);
+      out.uv = vec2<f32>(x * 0.5 + 0.5, 1.0 - (y * 0.5 + 0.5));
       return out;
     }
 
@@ -520,10 +543,10 @@ ${outputAssignments}
         return textureSample(t1, s, uv);
       } else if (bu.previewMode == 2u) {
         let d = textureSample(t2, s, uv);
-        return vec4<f32>(d.rgb, 1.0);
+        return vec4<f32>(d.x, d.y, d.z, 1.0);
       } else if (bu.previewMode == 3u) {
         let d = textureSample(t3, s, uv);
-        return vec4<f32>(d.rgb, 1.0);
+        return vec4<f32>(d.x, d.y, d.z, 1.0);
       } else {
         let subUv = fract(uv * 2.0);
         var border: f32 = 1.0;
@@ -538,10 +561,10 @@ ${outputAssignments}
           col = textureSample(t1, s, subUv);
         } else if (uv.x < 0.5 && uv.y >= 0.5) {
           let d = textureSample(t2, s, subUv);
-          col = vec4<f32>(d.rgb, 1.0);
+          col = vec4<f32>(d.x, d.y, d.z, 1.0);
         } else {
           let d = textureSample(t3, s, subUv);
-          col = vec4<f32>(d.rgb, 1.0);
+          col = vec4<f32>(d.x, d.y, d.z, 1.0);
         }
 
         return col * border;
@@ -549,54 +572,69 @@ ${outputAssignments}
     }
     `;
 
-    const shaderModule = this.device.createShaderModule({ code: blitWgsl });
+    try {
+      const shaderModule = this.device.createShaderModule({ code: blitWgsl });
+      shaderModule.getCompilationInfo?.().then((info) => {
+        for (const msg of info.messages) {
+          if (msg.type === 'error') {
+            console.error(`WebGPU Blit Shader Error [${msg.lineNum}:${msg.linePos}]: ${msg.message}`);
+          }
+        }
+      });
 
-    this.blitPipeline = this.device.createRenderPipeline({
-      layout: 'auto',
-      vertex: {
-        module: shaderModule,
-        entryPoint: 'vs_main',
-      },
-      fragment: {
-        module: shaderModule,
-        entryPoint: 'fs_main',
-        targets: [{ format: this.canvasFormat }],
-      },
-      primitive: {
-        topology: 'triangle-strip',
-      },
-    });
+      this.blitPipeline = this.device.createRenderPipeline({
+        layout: 'auto',
+        vertex: {
+          module: shaderModule,
+          entryPoint: 'vs_main',
+        },
+        fragment: {
+          module: shaderModule,
+          entryPoint: 'fs_main',
+          targets: [{ format: this.canvasFormat }],
+        },
+        primitive: {
+          topology: 'triangle-strip',
+        },
+      });
+    } catch (err) {
+      console.error('Failed to create WebGPU Blit RenderPipeline:', err);
+    }
   }
 
   private updateBindGroups(): void {
     if (!this.device || !this.mrtPipeline || !this.blitPipeline || !this.mrtUniformBuffer || !this.blitUniformBuffer || !this.sampler) return;
 
-    this.mrtBindGroup = this.device.createBindGroup({
-      layout: this.mrtPipeline.getBindGroupLayout(0),
-      entries: [
-        {
-          binding: 0,
-          resource: { buffer: this.mrtUniformBuffer },
-        },
-      ],
-    });
+    try {
+      this.mrtBindGroup = this.device.createBindGroup({
+        layout: this.mrtPipeline.getBindGroupLayout(0),
+        entries: [
+          {
+            binding: 0,
+            resource: { buffer: this.mrtUniformBuffer },
+          },
+        ],
+      });
 
-    const v0 = this.targetViews[0] || this.dummyViews[0]!;
-    const v1 = this.targetViews[1] || this.dummyViews[1]!;
-    const v2 = this.targetViews[2] || this.dummyViews[2]!;
-    const v3 = this.targetViews[3] || this.dummyViews[3]!;
+      const v0 = this.targetViews[0] || this.dummyViews[0]!;
+      const v1 = this.targetViews[1] || this.dummyViews[1]!;
+      const v2 = this.targetViews[2] || this.dummyViews[2]!;
+      const v3 = this.targetViews[3] || this.dummyViews[3]!;
 
-    this.blitBindGroup = this.device.createBindGroup({
-      layout: this.blitPipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: this.blitUniformBuffer } },
-        { binding: 1, resource: this.sampler },
-        { binding: 2, resource: v0 },
-        { binding: 3, resource: v1 },
-        { binding: 4, resource: v2 },
-        { binding: 5, resource: v3 },
-      ],
-    });
+      this.blitBindGroup = this.device.createBindGroup({
+        layout: this.blitPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: this.blitUniformBuffer } },
+          { binding: 1, resource: this.sampler },
+          { binding: 2, resource: v0 },
+          { binding: 3, resource: v1 },
+          { binding: 4, resource: v2 },
+          { binding: 5, resource: v3 },
+        ],
+      });
+    } catch (err) {
+      console.error('Failed to create WebGPU BindGroups:', err);
+    }
   }
 
   public render(time: number, config: BenchmarkConfig): void {
