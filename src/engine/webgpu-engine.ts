@@ -28,6 +28,11 @@ export class WebGPUEngine {
   private onDeviceLostCallback?: () => void;
   private cachedDeviceInfo: GpuDeviceInfo | null = null;
 
+  private mrtUniformArrayBuffer = new ArrayBuffer(32);
+  private mrtFloatView = new Float32Array(this.mrtUniformArrayBuffer);
+  private mrtUintView = new Uint32Array(this.mrtUniformArrayBuffer);
+  private blitUniformArray = new Uint32Array(4);
+
   constructor(
     canvas: HTMLCanvasElement,
     onDeviceLost?: () => void
@@ -137,20 +142,40 @@ export class WebGPUEngine {
         console.error('WebGPU uncaptured error:', event.error);
       });
 
-      const context = this.canvas.getContext('webgpu') as GPUCanvasContext | null;
+      let context: GPUCanvasContext | null = null;
+      try {
+        context = this.canvas.getContext('webgpu') as GPUCanvasContext | null;
+      } catch (e) {
+        console.warn('canvas.getContext("webgpu") threw:', e);
+      }
+
       if (!context) {
-        console.warn('WebGPU: Could not get webgpu canvas context.');
+        console.warn('WebGPU: Could not get webgpu canvas context (canvas may already be bound or WebGPU disabled).');
         return false;
       }
 
       this.context = context;
       this.canvasFormat = navigator.gpu.getPreferredCanvasFormat();
 
-      this.context.configure({
-        device: this.device,
-        format: this.canvasFormat,
-        alphaMode: 'opaque',
-      });
+      try {
+        this.context.configure({
+          device: this.device,
+          format: this.canvasFormat,
+          alphaMode: 'opaque',
+        });
+      } catch (cfgErr) {
+        console.warn('context.configure opaque failed, falling back to premultiplied:', cfgErr);
+        try {
+          this.context.configure({
+            device: this.device,
+            format: this.canvasFormat,
+            alphaMode: 'premultiplied',
+          });
+        } catch (e) {
+          console.error('WebGPU context configure fatal error:', e);
+          return false;
+        }
+      }
 
       await this.extractDeviceInfo();
 
@@ -245,19 +270,26 @@ export class WebGPUEngine {
   public updateTargets(width: number, height: number, config: BenchmarkConfig): boolean {
     if (!this.device || this.isDeviceLost) return false;
 
-    this.currentWidth = width;
-    this.currentHeight = height;
+    const maxDim = this.device.limits?.maxTextureDimension2D || 8192;
+    const clampedW = Math.max(1, Math.min(maxDim, width));
+    const clampedH = Math.max(1, Math.min(maxDim, height));
+
+    this.currentWidth = clampedW;
+    this.currentHeight = clampedH;
 
     this.destroyTargetTextures();
 
+    const maxAttachments = this.device.limits?.maxColorAttachments || 8;
+    const effectiveMrtCount = Math.min(config.mrtCount, maxAttachments);
+
     const targetFormats: GPUTextureFormat[] = [];
-    for (let i = 0; i < config.mrtCount; i++) {
+    for (let i = 0; i < effectiveMrtCount; i++) {
       const formatOpt = config.formats[i];
       const gpuFormat: GPUTextureFormat = formatOpt === 'RGBA16F' ? 'rgba16float' : 'rgba8unorm';
       targetFormats.push(gpuFormat);
 
       const texture = this.device.createTexture({
-        size: [width, height, 1],
+        size: [clampedW, clampedH, 1],
         format: gpuFormat,
         usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
       });
@@ -266,7 +298,7 @@ export class WebGPUEngine {
       this.targetViews[i] = texture.createView();
     }
 
-    for (let i = config.mrtCount; i < 4; i++) {
+    for (let i = effectiveMrtCount; i < 4; i++) {
       const dummy = this.device.createTexture({
         size: [1, 1, 1],
         format: 'rgba8unorm',
@@ -276,7 +308,7 @@ export class WebGPUEngine {
       this.dummyViews[i] = dummy.createView();
     }
 
-    this.buildMrtPipeline(config.mrtCount, targetFormats);
+    this.buildMrtPipeline(effectiveMrtCount, targetFormats);
     this.buildBlitPipeline();
     this.updateBindGroups();
 
@@ -570,78 +602,86 @@ ${outputAssignments}
   public render(time: number, config: BenchmarkConfig): void {
     if (!this.device || this.isDeviceLost || !this.context || !this.mrtPipeline || !this.blitPipeline) return;
 
-    const aluComplexityIndex = config.aluComplexity === 'low' ? 0 : config.aluComplexity === 'medium' ? 1 : 2;
-    const passes = Math.max(1, config.passes || 1);
+    try {
+      const maxAttachments = this.device.limits?.maxColorAttachments || 8;
+      const effectiveMrtCount = Math.min(config.mrtCount, maxAttachments);
+      const aluComplexityIndex = config.aluComplexity === 'low' ? 0 : config.aluComplexity === 'medium' ? 1 : 2;
+      const passes = Math.max(1, config.passes || 1);
 
-    const mrtUniformData = new ArrayBuffer(32);
-    const mrtFloatView = new Float32Array(mrtUniformData);
-    const mrtUintView = new Uint32Array(mrtUniformData);
+      this.mrtFloatView[0] = time;
+      this.mrtUintView[1] = aluComplexityIndex;
+      this.mrtFloatView[2] = this.currentWidth;
+      this.mrtFloatView[3] = this.currentHeight;
+      this.mrtUintView[4] = effectiveMrtCount;
 
-    mrtFloatView[0] = time;
-    mrtUintView[1] = aluComplexityIndex;
-    mrtFloatView[2] = this.currentWidth;
-    mrtFloatView[3] = this.currentHeight;
-    mrtUintView[4] = config.mrtCount;
+      this.device.queue.writeBuffer(this.mrtUniformBuffer!, 0, this.mrtUniformArrayBuffer);
 
-    this.device.queue.writeBuffer(this.mrtUniformBuffer!, 0, mrtUniformData);
+      let previewMode = 0;
+      if (config.previewTarget === 'target1') previewMode = 1;
+      else if (config.previewTarget === 'target2') previewMode = 2;
+      else if (config.previewTarget === 'target3') previewMode = 3;
+      else if (config.previewTarget === 'split') previewMode = 4;
 
-    let previewMode = 0;
-    if (config.previewTarget === 'target1') previewMode = 1;
-    else if (config.previewTarget === 'target2') previewMode = 2;
-    else if (config.previewTarget === 'target3') previewMode = 3;
-    else if (config.previewTarget === 'split') previewMode = 4;
-
-    if (previewMode < 4 && previewMode >= config.mrtCount) {
-      previewMode = 0;
-    }
-
-    const blitUniformData = new Uint32Array([previewMode, 0, 0, 0]);
-    this.device.queue.writeBuffer(this.blitUniformBuffer!, 0, blitUniformData);
-
-    const commandEncoder = this.device.createCommandEncoder();
-
-    const colorAttachments: GPURenderPassColorAttachment[] = [];
-    for (let i = 0; i < config.mrtCount; i++) {
-      const view = this.targetViews[i];
-      if (view) {
-        colorAttachments.push({
-          view,
-          clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
-          loadOp: 'clear',
-          storeOp: 'store',
-        });
+      if (previewMode < 4 && previewMode >= effectiveMrtCount) {
+        previewMode = 0;
       }
+
+      this.blitUniformArray[0] = previewMode;
+      this.blitUniformArray[1] = 0;
+      this.blitUniformArray[2] = 0;
+      this.blitUniformArray[3] = 0;
+      this.device.queue.writeBuffer(this.blitUniformBuffer!, 0, this.blitUniformArray);
+
+      const commandEncoder = this.device.createCommandEncoder();
+
+      const colorAttachments: GPURenderPassColorAttachment[] = [];
+      for (let i = 0; i < effectiveMrtCount; i++) {
+        const view = this.targetViews[i];
+        if (view) {
+          colorAttachments.push({
+            view,
+            clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
+            loadOp: 'clear',
+            storeOp: 'store',
+          });
+        }
+      }
+
+      if (colorAttachments.length > 0) {
+        const mrtPass = commandEncoder.beginRenderPass({
+          colorAttachments,
+        });
+        mrtPass.setPipeline(this.mrtPipeline);
+        mrtPass.setBindGroup(0, this.mrtBindGroup!);
+
+        for (let p = 0; p < passes; p++) {
+          mrtPass.draw(4, 1, 0, 0);
+        }
+        mrtPass.end();
+      }
+
+      const currentTexture = this.context.getCurrentTexture();
+      const canvasTextureView = currentTexture.createView();
+      const blitPass = commandEncoder.beginRenderPass({
+        colorAttachments: [
+          {
+            view: canvasTextureView,
+            clearValue: { r: 0.05, g: 0.05, b: 0.08, a: 1.0 },
+            loadOp: 'clear',
+            storeOp: 'store',
+          },
+        ],
+      });
+
+      blitPass.setPipeline(this.blitPipeline);
+      blitPass.setBindGroup(0, this.blitBindGroup!);
+      blitPass.draw(4, 1, 0, 0);
+      blitPass.end();
+
+      this.device.queue.submit([commandEncoder.finish()]);
+    } catch (err) {
+      console.warn('WebGPU render frame encountered an error:', err);
     }
-
-    const mrtPass = commandEncoder.beginRenderPass({
-      colorAttachments,
-    });
-    mrtPass.setPipeline(this.mrtPipeline);
-    mrtPass.setBindGroup(0, this.mrtBindGroup!);
-
-    for (let p = 0; p < passes; p++) {
-      mrtPass.draw(4, 1, 0, 0);
-    }
-    mrtPass.end();
-
-    const canvasTextureView = this.context.getCurrentTexture().createView();
-    const blitPass = commandEncoder.beginRenderPass({
-      colorAttachments: [
-        {
-          view: canvasTextureView,
-          clearValue: { r: 0.05, g: 0.05, b: 0.08, a: 1.0 },
-          loadOp: 'clear',
-          storeOp: 'store',
-        },
-      ],
-    });
-
-    blitPass.setPipeline(this.blitPipeline);
-    blitPass.setBindGroup(0, this.blitBindGroup!);
-    blitPass.draw(4, 1, 0, 0);
-    blitPass.end();
-
-    this.device.queue.submit([commandEncoder.finish()]);
   }
 
   private destroyTargetTextures(): void {

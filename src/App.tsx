@@ -29,6 +29,9 @@ export default function App() {
   const rafIdRef = useRef<number | null>(null);
   const startTimeRef = useRef<number>(performance.now());
   const lastUiUpdateRef = useRef<number>(0);
+  const accumulatedTimeRef = useRef<number>(0);
+  const lastLoopTimestampRef = useRef<number>(performance.now());
+  const prevPausedRef = useRef<boolean>(false);
 
   // Benchmark Config State
   const [config, setConfig] = useState<BenchmarkConfig>({
@@ -96,6 +99,8 @@ export default function App() {
   // Calculate resolution
   const computeResolution = useCallback(() => {
     switch (config.resolutionPreset) {
+      case '480p':
+        return { width: 854, height: 480 };
       case '720p':
         return { width: 1280, height: 720 };
       case '1080p':
@@ -245,15 +250,28 @@ export default function App() {
       }
 
       startTimeRef.current = performance.now();
+      lastLoopTimestampRef.current = performance.now();
 
       // Render Loop
       const renderLoop = (timestamp: number) => {
         if (!active) return;
 
-        if (!config.isPaused) {
-          metricsEngineRef.current.recordFrame(timestamp);
+        const now = timestamp || performance.now();
+        const dt = (now - lastLoopTimestampRef.current) / 1000;
+        lastLoopTimestampRef.current = now;
 
-          const timeSec = (timestamp - startTimeRef.current) / 1000;
+        if (prevPausedRef.current && !config.isPaused) {
+          metricsEngineRef.current.onResume();
+        }
+        prevPausedRef.current = config.isPaused;
+
+        if (!config.isPaused) {
+          if (dt > 0 && dt < 0.25) {
+            accumulatedTimeRef.current += dt;
+          }
+          metricsEngineRef.current.recordFrame(now);
+
+          const timeSec = accumulatedTimeRef.current;
           if (config.api === 'webgpu' && webgpuEngineRef.current) {
             webgpuEngineRef.current.render(timeSec, config);
           } else if (webgl2EngineRef.current) {
@@ -262,8 +280,8 @@ export default function App() {
         }
 
         // Throttle UI telemetry updates to ~12 Hz to eliminate React reconciliation latency
-        if (timestamp - lastUiUpdateRef.current > 80) {
-          lastUiUpdateRef.current = timestamp;
+        if (now - lastUiUpdateRef.current > 80) {
+          lastUiUpdateRef.current = now;
           const snap = metricsEngineRef.current.getSnapshot(config, targetRes.width, targetRes.height);
           setMetrics(snap);
         }
@@ -332,7 +350,30 @@ export default function App() {
     return () => clearInterval(timer);
   }, [isBenchmarking, config, deviceInfo, computeResolution]);
 
+  // When paused, render a single frame when config updates so user can preview settings
+  useEffect(() => {
+    if (config.isPaused) {
+      const timeSec = accumulatedTimeRef.current;
+      if (config.api === 'webgpu' && webgpuEngineRef.current) {
+        webgpuEngineRef.current.render(timeSec, config);
+      } else if (webgl2EngineRef.current) {
+        webgl2EngineRef.current.render(timeSec, config);
+      }
+    }
+  }, [
+    config.isPaused,
+    config.previewTarget,
+    config.aluComplexity,
+    config.passes,
+    config.mrtCount,
+    config.formats,
+  ]);
+
   const handleStartBenchmark = () => {
+    if (config.isPaused) {
+      setConfig((prev) => ({ ...prev, isPaused: false }));
+    }
+    metricsEngineRef.current.reset();
     setIsBenchmarking(true);
     setBenchmarkProgress(0);
     setBenchmarkCountdown(10);
@@ -362,7 +403,7 @@ export default function App() {
   return (
     <div
       ref={containerRef}
-      className="app-container relative w-screen h-screen overflow-hidden bg-slate-950 font-sans select-none"
+      className="app-container relative w-screen h-screen overflow-hidden bg-slate-950 font-sans"
       style={{
         position: 'relative',
         width: '100vw',
@@ -371,8 +412,9 @@ export default function App() {
         backgroundColor: '#020617',
       }}
     >
-      {/* Background Main Canvas */}
+      {/* Background Main Canvas - key={config.api} guarantees clean context separation between WebGL and WebGPU */}
       <canvas
+        key={config.api}
         ref={canvasRef}
         className="app-canvas w-full h-full object-cover block bg-slate-950"
         style={{

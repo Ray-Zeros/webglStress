@@ -372,8 +372,19 @@ export class WebGL2Engine {
       }
       `;
 
-      const hasDrawBuffers = !!this.extDrawBuffers;
-      const extHeader = hasDrawBuffers ? '#extension GL_EXT_draw_buffers : require\n' : '';
+      const hasDrawBuffers = !!this.extDrawBuffers && this.maxDrawBuffers > 1;
+      const extHeader = hasDrawBuffers ? '#extension GL_EXT_draw_buffers : enable\n' : '';
+
+      let drawBuffersAssignments = 'gl_FragData[0] = t0;\n';
+      if (this.maxDrawBuffers >= 2) {
+        drawBuffersAssignments += '          if (u_mrt_count > 1) gl_FragData[1] = t1;\n';
+      }
+      if (this.maxDrawBuffers >= 3) {
+        drawBuffersAssignments += '          if (u_mrt_count > 2) gl_FragData[2] = t2;\n';
+      }
+      if (this.maxDrawBuffers >= 4) {
+        drawBuffersAssignments += '          if (u_mrt_count > 3) gl_FragData[3] = t3;\n';
+      }
 
       fsSource = `
       ${extHeader}
@@ -434,10 +445,7 @@ export class WebGL2Engine {
         vec4 t3 = vec4(albedo * 1.5, 1.0);
 
         #if defined(GL_EXT_draw_buffers)
-          gl_FragData[0] = t0;
-          if (u_mrt_count > 1) gl_FragData[1] = t1;
-          if (u_mrt_count > 2) gl_FragData[2] = t2;
-          if (u_mrt_count > 3) gl_FragData[3] = t3;
+          ${drawBuffersAssignments}
         #else
           gl_FragColor = t0;
         #endif
@@ -748,6 +756,7 @@ export class WebGL2Engine {
     }
     gl.attachShader(prog, vs);
     gl.attachShader(prog, fs);
+    gl.bindAttribLocation(prog, 0, 'a_position');
     gl.linkProgram(prog);
 
     if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {

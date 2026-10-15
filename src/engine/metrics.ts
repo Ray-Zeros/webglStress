@@ -19,9 +19,13 @@ export class RollingMetricsEngine {
     this.timestamps = [];
     this.frameDurations = [];
     this.recentHistory = [];
-    this.lastFrameTime = performance.now();
+    this.lastFrameTime = 0;
     this.totalFramesCount = 0;
     this.startTime = performance.now();
+  }
+
+  public onResume(): void {
+    this.lastFrameTime = 0;
   }
 
   public recordFrame(now: number): void {
@@ -70,7 +74,7 @@ export class RollingMetricsEngine {
     const passes = Math.max(1, config.passes || 1);
     const mbPerFrame = (width * height * bytesPerPixel * passes) / 1_000_000;
 
-    if (count < 2) {
+    if (config.isPaused || count < 2) {
       return {
         instantFps: 0,
         windowAvgFps: 0,

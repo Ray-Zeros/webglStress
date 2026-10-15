@@ -115,11 +115,15 @@ export const MetricsPanel: React.FC<MetricsPanelProps> = ({
             </span>
             <Activity className="w-3 h-3 text-cyan-400" size={14} style={{ color: '#22d3ee' }} />
           </div>
-          <div className="text-xl sm:text-2xl font-black font-mono text-white mt-0.5" style={{ color: '#ffffff' }}>
-            {metrics.instantFps.toFixed(0)}
+          <div className="text-xl sm:text-2xl font-black font-mono text-white mt-0.5 flex items-baseline gap-1" style={{ color: '#ffffff' }}>
+            {metrics.instantFps > 0 ? (
+              metrics.instantFps.toFixed(0)
+            ) : (
+              <span className="text-amber-400 text-sm font-bold tracking-normal" style={{ color: '#fbbf24' }}>PAUSED</span>
+            )}
           </div>
           <div className="text-[10px] text-slate-400 font-mono" style={{ color: '#94a3b8' }}>
-            {metrics.instantFps > 0 ? (1000 / metrics.instantFps).toFixed(1) : 0} ms
+            {metrics.instantFps > 0 ? `${(1000 / metrics.instantFps).toFixed(1)} ms` : 'Stopped'}
           </div>
         </div>
 

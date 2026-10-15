@@ -4,7 +4,7 @@ export type TextureFormatOption = 'RGBA8' | 'RGBA16F';
 
 export type ALUComplexity = 'low' | 'medium' | 'heavy';
 
-export type ResolutionPreset = '720p' | '1080p' | '1440p' | '4k' | 'native' | 'custom';
+export type ResolutionPreset = '480p' | '720p' | '1080p' | '1440p' | '4k' | 'native' | 'custom';
 
 export type PreviewTarget = 'target0' | 'target1' | 'target2' | 'target3' | 'split';
 

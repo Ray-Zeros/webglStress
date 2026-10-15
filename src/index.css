@@ -53,9 +53,27 @@ html, body, #root {
 }
 
 /* Touch scroll smooth on mobile WebViews */
-.touch-scroll {
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain;
+.touch-scroll, .hud-scroll-viewport {
+  -webkit-overflow-scrolling: touch !important;
+  touch-action: pan-y !important;
+  overscroll-behavior-y: contain !important;
+  scrollbar-width: thin !important;
+  scrollbar-color: #0284c7 #090d16 !important;
+}
+
+.hud-scroll-viewport::-webkit-scrollbar {
+  width: 6px !important;
+  height: 6px !important;
+  display: block !important;
+}
+
+.hud-scroll-viewport::-webkit-scrollbar-track {
+  background: #090d16 !important;
+}
+
+.hud-scroll-viewport::-webkit-scrollbar-thumb {
+  background: #0284c7 !important;
+  border-radius: 4px !important;
 }
 
 /* Fallback card styles that work without Tailwind @layer */
